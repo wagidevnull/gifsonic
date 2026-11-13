@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=gifsonic
+GenericName=GIF Maker
+Comment=Turn videos into GIFs with text and image overlays
+Exec=gifsonic %f
+Icon=gifsonic
+Terminal=false
+Categories=AudioVideo;Video;
+MimeType=video/mp4;video/webm;video/x-matroska;video/quicktime;video/x-msvideo;video/mpeg;video/ogg;video/3gpp;image/gif;
+Keywords=gif;video;convert;meme;animation;
+StartupWMClass=gifsonic

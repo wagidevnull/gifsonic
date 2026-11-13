@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""gifsonic launcher: runs the app in its own window on Linux.
+
+Starts a small local helper (127.0.0.1 only, random port, secret token) that
+serves the app and adds desktop features the browser can't do alone:
+converting video formats the window can't play (via ffmpeg) and saving GIFs
+to ~/Pictures/gifsonic.
+
+Window: a native window via pywebview if it's installed, otherwise a
+Chromium-family browser in app mode, otherwise your default browser.
+
+usage: gifsonic [VIDEO] [--browser] [--no-window] [--version]
+"""
+
+import argparse
+import http.server
+import json
+import mimetypes
+import os
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.parse
+
+VERSION = "1.0.0"
+APP_DIR = os.path.dirname(os.path.realpath(__file__))
+DATA_DIR = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "gifsonic")
+TOKEN = secrets.token_urlsafe(24)
+HEARTBEAT_TIMEOUT = 30  # seconds without a ping before the helper exits (browser mode)
+
+initial_file = None
+last_ping = time.monotonic()
+
+
+def save_dir():
+    """Where GIFs are saved: $GIFSONIC_SAVE_DIR, else ~/Pictures/gifsonic."""
+    if os.environ.get("GIFSONIC_SAVE_DIR"):
+        return os.path.expanduser(os.environ["GIFSONIC_SAVE_DIR"])
+    return os.path.join(pictures_dir(), "gifsonic")
+
+
+def pictures_dir():
+    try:
+        d = subprocess.run(["xdg-user-dir", "PICTURES"], capture_output=True, text=True, timeout=3).stdout.strip()
+        if d and d != os.path.expanduser("~"):
+            return d
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return os.path.expanduser("~/Pictures")
+
+
+def unique_path(folder, name):
+    base, ext = os.path.splitext(name)
+    path, n = os.path.join(folder, name), 1
+    while os.path.exists(path):
+        path = os.path.join(folder, f"{base}-{n}{ext}")
+        n += 1
+    return path
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, directory=APP_DIR, **kw)
+
+    def log_message(self, *a):
+        pass
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+    # ---------------------------------------------------------------- helpers
+    def reply(self, code, body=b"", ctype="text/plain; charset=utf-8", headers=None):
+        if isinstance(body, str):
+            body = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def authorized(self):
+        if self.headers.get("X-Gifsonic-Token") != TOKEN:
+            self.reply(403, "forbidden")
+            return False
+        return True
+
+    def read_body_to(self, path):
+        remaining = int(self.headers.get("Content-Length", 0))
+        with open(path, "wb") as f:
+            while remaining > 0:
+                chunk = self.rfile.read(min(1 << 20, remaining))
+                if not chunk:
+                    break
+                f.write(chunk)
+                remaining -= len(chunk)
+
+    def send_file(self, path, ctype, headers=None):
+        size = os.path.getsize(path)
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(size))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        with open(path, "rb") as f:
+            shutil.copyfileobj(f, self.wfile, 1 << 20)
+
+    # ---------------------------------------------------------------- routes
+    def do_GET(self):
+        global last_ping
+        url = urllib.parse.urlparse(self.path)
+        if not url.path.startswith("/api/"):
+            return super().do_GET()
+        if not self.authorized():
+            return
+        q = urllib.parse.parse_qs(url.query)
+        if url.path == "/api/ping":
+            last_ping = time.monotonic()
+            return self.reply(200, json.dumps({"version": VERSION, "ffmpeg": bool(shutil.which("ffmpeg"))}), "application/json")
+        if url.path == "/api/initial":
+            if not initial_file:
+                return self.reply(204)
+            ctype = mimetypes.guess_type(initial_file)[0] or "application/octet-stream"
+            return self.send_file(initial_file, ctype, {"X-Filename": urllib.parse.quote(os.path.basename(initial_file))})
+        if url.path == "/api/reveal":
+            path = q.get("path", [""])[0]
+            folder = os.path.dirname(path) if os.path.isfile(path) else path
+            if os.path.isdir(folder):
+                subprocess.Popen(["xdg-open", folder], start_new_session=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return self.reply(200, "ok")
+        self.reply(404, "not found")
+
+    def do_POST(self):
+        url = urllib.parse.urlparse(self.path)
+        if not self.authorized():
+            return
+        q = urllib.parse.parse_qs(url.query)
+        if url.path == "/api/save":
+            name = os.path.basename(q.get("name", ["gifsonic.gif"])[0]) or "gifsonic.gif"
+            if not name.lower().endswith(".gif"):
+                name += ".gif"
+            folder = save_dir()
+            os.makedirs(folder, exist_ok=True)
+            path = unique_path(folder, name)
+            self.read_body_to(path)
+            return self.reply(200, json.dumps({"path": path}), "application/json")
+        if url.path == "/api/proxy":
+            return self.proxy(q.get("fmt", ["mp4"])[0])
+        self.reply(404, "not found")
+
+    def proxy(self, fmt):
+        """Convert a video the window can't decode into something it can."""
+        if not shutil.which("ffmpeg"):
+            return self.reply(501, "ffmpeg is not installed")
+        with tempfile.TemporaryDirectory(prefix="gifsonic-") as tmp:
+            src = os.path.join(tmp, "input")
+            self.read_body_to(src)
+            scale = ["-vf", "scale='min(1920,iw)':-2"]
+            if fmt == "webm":
+                out, codec = os.path.join(tmp, "out.webm"), ["-c:v", "libvpx", "-deadline", "realtime",
+                                                              "-cpu-used", "8", "-crf", "6", "-b:v", "25M"]
+                ctype = "video/webm"
+            else:
+                out, codec = os.path.join(tmp, "out.mp4"), ["-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                                                             "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+                ctype = "video/mp4"
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-map", "0:v:0", "-an", *scale, *codec, out],
+                               capture_output=True, text=True)
+            if r.returncode != 0 or not os.path.exists(out):
+                return self.reply(422, "ffmpeg failed: " + r.stderr[-500:])
+            return self.send_file(out, ctype)
+
+
+def start_server():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def open_native(url):
+    try:
+        import webview  # pywebview
+    except ImportError:
+        return False
+    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        webview.create_window("gifsonic", url, width=1360, height=860, min_size=(900, 600),
+                              background_color="#11111b")
+        webview.start(private_mode=False, storage_path=os.path.join(DATA_DIR, "webview"))
+        return True
+    except Exception as e:  # missing GTK/Qt backend etc.
+        print(f"gifsonic: native window unavailable ({e}); falling back to a browser", file=sys.stderr)
+        return False
+
+
+def open_browser(url):
+    """Chromium-family app window if available (closes cleanly), else default browser."""
+    for name in ("chromium", "google-chrome-stable", "google-chrome", "brave", "brave-browser",
+                 "vivaldi-stable", "microsoft-edge-stable", "thorium-browser"):
+        exe = shutil.which(name)
+        if exe:
+            profile = os.path.join(DATA_DIR, "browser-profile")
+            os.makedirs(profile, exist_ok=True)
+            p = subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1360,860",
+                                  "--no-first-run", "--no-default-browser-check"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            p.wait()
+            return
+    subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    wait_for_heartbeats()
+
+
+def wait_for_heartbeats():
+    """Default browser: we can't see the tab close, so exit when it stops pinging."""
+    global last_ping
+    last_ping = time.monotonic() + 30  # grace period for the browser to start
+    try:
+        while time.monotonic() - last_ping < HEARTBEAT_TIMEOUT:
+            time.sleep(2)
+    except KeyboardInterrupt:
+        pass
+
+
+def main():
+    global initial_file
+    ap = argparse.ArgumentParser(prog="gifsonic", description="Turn videos into GIFs.")
+    ap.add_argument("video", nargs="?", help="video to open")
+    ap.add_argument("--browser", action="store_true", help="open in a browser instead of a native window")
+    ap.add_argument("--no-window", action="store_true", help="just print the URL and keep serving")
+    ap.add_argument("--version", action="version", version=f"gifsonic {VERSION}")
+    args = ap.parse_args()
+
+    if args.video:
+        path = os.path.abspath(os.path.expanduser(args.video))
+        if not os.path.isfile(path):
+            ap.error(f"no such file: {args.video}")
+        initial_file = path
+
+    srv = start_server()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/index.html?token={TOKEN}"
+    if not shutil.which("ffmpeg"):
+        print("gifsonic: ffmpeg not found - unusual video formats can't be converted", file=sys.stderr)
+
+    try:
+        if args.no_window:
+            print(url, flush=True)
+            print("serving - press Ctrl+C to stop", file=sys.stderr)
+            while True:
+                time.sleep(3600)
+        elif args.browser or not open_native(url):
+            open_browser(url)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.shutdown()
+
+
+if __name__ == "__main__":
+    main()

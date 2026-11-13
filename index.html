@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gifsonic</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2311111b'/><text x='8' y='12' font-family='monospace' font-size='11' text-anchor='middle' fill='%23f5c2e7'>&gt;</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="titlebar">
+    <span class="brand">gifsonic</span>
+    <span class="dim">video &rarr; gif</span>
+    <span id="file-label" class="file-label dim">no video loaded</span>
+    <span class="spacer"></span>
+    <button class="btn" data-action="open-video" title="Open video (v)">[ v open video ]</button>
+    <button class="btn" data-action="help" title="Keyboard shortcuts (?)">[ ? help ]</button>
+  </header>
+
+  <main class="workspace">
+    <!-- ====================================================== preview -->
+    <section class="box preview-box">
+      <div class="box-title"><span id="preview-title">preview</span><span id="preview-info" class="dim"></span></div>
+      <div id="stage" class="stage">
+        <canvas id="preview"></canvas>
+        <div id="empty" class="empty">
+<pre class="logo">       _  __                 _
+  __ _(_)/ _|___  ___  _ __ (_) ___
+ / _` | | |_/ __|/ _ \| '_ \| |/ __|
+| (_| | |  _\__ \ (_) | | | | | (__
+ \__, |_|_| |___/\___/|_| |_|_|\___|
+ |___/</pre>
+          <p>drop a video here, or press <kbd>v</kbd></p>
+          <p class="dim">mp4 / webm / anything your browser can play &middot; nothing is uploaded, it all stays on your computer</p>
+        </div>
+      </div>
+      <div id="crop-bar" class="crop-bar hidden">
+        <span class="accent">CROP</span>
+        <span class="dim">drag on the video &middot; aspect</span>
+        <span class="seg" id="crop-aspect">
+          <button data-aspect="free" class="on">free</button><button data-aspect="1">1:1</button><button data-aspect="1.3333">4:3</button><button data-aspect="1.7778">16:9</button><button data-aspect="0.5625">9:16</button>
+        </span>
+        <span class="dim">x</span><input class="num" id="crop-x" type="number" min="0">
+        <span class="dim">y</span><input class="num" id="crop-y" type="number" min="0">
+        <span class="dim">w</span><input class="num" id="crop-w" type="number" min="16">
+        <span class="dim">h</span><input class="num" id="crop-h" type="number" min="16">
+        <button class="btn" data-action="crop-reset">[ reset ]</button>
+        <button class="btn primary" data-action="crop-done">[ done &#x23CE; ]</button>
+      </div>
+    </section>
+
+    <!-- ====================================================== timeline -->
+    <section class="box timeline-box">
+      <div class="box-title"><span>timeline</span><span id="tl-info" class="dim"></span></div>
+      <div class="transport">
+        <button class="btn" data-action="frame-back" title="Back one frame (&lt;)">[ &lt; ]</button>
+        <button class="btn" id="play-btn" data-action="play" title="Play selection (space)">[ &#x25B6; play ]</button>
+        <button class="btn" data-action="frame-fwd" title="Forward one frame (&gt;)">[ &gt; ]</button>
+        <label class="field" title="Playhead: type seconds (12.5) or m:ss.cc (1:02.5)">
+          <span class="dim">@</span><input id="t-pos" class="time" type="text" value="0:00.00">
+        </label>
+        <span class="sep">&#x2502;</span>
+        <label class="field"><span class="dim">start</span><input id="t-start" class="time" type="text"></label>
+        <button class="btn small" data-action="set-start" title="Start at playhead (i)">[ i ]</button>
+        <label class="field"><span class="dim">end</span><input id="t-end" class="time" type="text"></label>
+        <button class="btn small" data-action="set-end" title="End at playhead (o)">[ o ]</button>
+        <label class="field"><span class="dim">duration</span><input id="t-dur" class="time" type="text"></label>
+      </div>
+      <div id="timeline" class="timeline">
+        <div class="tl-ruler" id="tl-ruler"></div>
+        <div class="tl-track">
+          <div class="tl-range" id="tl-range"></div>
+          <div class="tl-handle" id="tl-h-start" title="drag to set start"></div>
+          <div class="tl-handle" id="tl-h-end" title="drag to set end"></div>
+          <div class="tl-playhead" id="tl-playhead"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== sidebar -->
+    <aside class="sidebar">
+      <section class="box">
+        <div class="box-title"><span>output</span><span id="out-info" class="dim"></span></div>
+        <div class="row">
+          <span class="label">width</span>
+          <span class="seg wrap" id="size-seg">
+            <button data-size="100">100</button><button data-size="160">160</button><button data-size="260">260</button><button data-size="320">320</button><button data-size="360">360</button><button data-size="480">480</button><button data-size="640">640</button><button data-size="800">800</button>
+          </span>
+        </div>
+        <div class="row">
+          <span class="label"></span>
+          <label class="field"><span class="dim">custom</span><input id="size-custom" class="num" type="number" min="16" max="1920"><span class="dim">px</span></label>
+        </div>
+        <div class="row">
+          <span class="label">fps</span>
+          <span class="seg wrap" id="fps-seg">
+            <button data-fps="5">5</button><button data-fps="10">10</button><button data-fps="12">12</button><button data-fps="15">15</button><button data-fps="20">20</button><button data-fps="24">24</button><button data-fps="25">25</button><button data-fps="30">30</button><button data-fps="50">50</button>
+          </span>
+        </div>
+        <div class="row">
+          <span class="label">colors</span>
+          <select id="colors"><option>256</option><option>128</option><option>64</option><option>32</option><option>16</option></select>
+          <label class="check"><input type="checkbox" id="dither" checked> dither</label>
+        </div>
+        <div class="row">
+          <span class="label">loop</span>
+          <select id="loop"><option value="0">forever</option><option value="-1">play once</option><option value="2">3 times</option></select>
+          <span class="label">crop</span>
+          <button class="btn small" data-action="crop">[ c edit ]</button>
+        </div>
+        <button class="btn primary wide" data-action="export">[ e  make gif ]</button>
+      </section>
+
+      <section class="box">
+        <div class="box-title"><span>layers</span><span class="dim">text &amp; images on top</span></div>
+        <div class="row">
+          <button class="btn" data-action="add-text">[ t + text ]</button>
+          <button class="btn" data-action="add-image">[ p + image ]</button>
+        </div>
+        <ul id="layer-list" class="layer-list"></ul>
+      </section>
+
+      <section class="box" id="layer-props">
+        <div class="box-title"><span id="lp-title">layer</span><span class="dim" id="lp-hint">select a layer</span></div>
+        <div id="lp-body" class="hidden">
+          <div id="lp-text">
+            <textarea id="lp-text-value" rows="2" spellcheck="false"></textarea>
+            <div class="row">
+              <span class="label">font</span>
+              <input id="lp-font" type="text" list="fonts" spellcheck="false">
+              <datalist id="fonts">
+                <option value="sans-serif"><option value="serif"><option value="monospace"><option value="Impact"><option value="Arial Black"><option value="Comic Sans MS"><option value="Noto Sans"><option value="DejaVu Sans">
+              </datalist>
+            </div>
+            <div class="row">
+              <span class="label">style</span>
+              <label class="check"><input type="checkbox" id="lp-bold"> bold</label>
+              <label class="check"><input type="checkbox" id="lp-italic"> italic</label>
+              <span class="seg" id="lp-align"><button data-align="left">L</button><button data-align="center">C</button><button data-align="right">R</button></span>
+            </div>
+            <div class="row">
+              <span class="label">color</span>
+              <input type="color" id="lp-color">
+              <span class="dim">outline</span><input type="color" id="lp-stroke">
+              <input type="range" id="lp-stroke-w" min="0" max="20" step="1" class="short">
+            </div>
+            <div class="row">
+              <span class="label">box</span>
+              <input type="color" id="lp-bg">
+              <span class="dim">opacity</span><input type="range" id="lp-bg-a" min="0" max="1" step="0.05" class="short">
+            </div>
+          </div>
+          <div id="lp-image" class="row">
+            <span class="label">image</span><span id="lp-image-name" class="dim ellip"></span>
+            <button class="btn small" data-action="replace-image">[ replace ]</button>
+          </div>
+          <div class="hr"></div>
+          <div class="row"><span class="label">x</span><input type="range" id="lp-x" min="-0.25" max="1.25" step="0.001"><input class="num" id="lp-x-n" type="number" step="1"><span class="dim">%</span></div>
+          <div class="row"><span class="label">y</span><input type="range" id="lp-y" min="-0.25" max="1.25" step="0.001"><input class="num" id="lp-y-n" type="number" step="1"><span class="dim">%</span></div>
+          <div class="row"><span class="label">size</span><input type="range" id="lp-size" min="0.02" max="2" step="0.005"><input class="num" id="lp-size-n" type="number" step="1"><span class="dim">%</span></div>
+          <div class="row"><span class="label">rotate</span><input type="range" id="lp-rot" min="-180" max="180" step="1"><input class="num" id="lp-rot-n" type="number" step="1"><span class="dim">&deg;</span></div>
+          <div class="row"><span class="label">opacity</span><input type="range" id="lp-op" min="0" max="1" step="0.01"><input class="num" id="lp-op-n" type="number" step="1"><span class="dim">%</span></div>
+          <div class="hr"></div>
+          <div class="row"><span class="label">crop</span><span class="dim">trim each side of the layer</span></div>
+          <div class="row"><span class="label dim">left</span><input type="range" id="lp-cl" min="0" max="0.95" step="0.005"><span class="label dim">right</span><input type="range" id="lp-cr" min="0" max="0.95" step="0.005"></div>
+          <div class="row"><span class="label dim">top</span><input type="range" id="lp-ct" min="0" max="0.95" step="0.005"><span class="label dim">bottom</span><input type="range" id="lp-cb" min="0" max="0.95" step="0.005"></div>
+          <div class="row">
+            <button class="btn small" data-action="layer-center">[ center ]</button>
+            <button class="btn small" data-action="layer-reset">[ reset transform ]</button>
+            <button class="btn small" data-action="layer-dup">[ duplicate ]</button>
+            <button class="btn small danger" data-action="layer-del">[ delete ]</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="keys" id="keys">
+    <span><kbd>spc</kbd>play</span><span><kbd>&lt; &gt;</kbd>frame</span><span><kbd>j l</kbd>&plusmn;1s</span>
+    <span><kbd>i o</kbd>start/end</span><span><kbd>c</kbd>crop</span><span><kbd>t</kbd>text</span><span><kbd>p</kbd>image</span>
+    <span><kbd>tab</kbd>next layer</span><span><kbd>&larr;&uarr;&darr;&rarr;</kbd>move</span><span><kbd>e</kbd>make gif</span><span><kbd>?</kbd>help</span>
+    <span class="spacer"></span><span id="status" class="dim"></span>
+  </footer>
+</div>
+
+<!-- hidden helpers -->
+<video id="video" muted playsinline preload="auto"></video>
+<input type="file" id="video-file" accept="video/*,.mkv,.mov,.gif" hidden>
+<input type="file" id="image-file" accept="image/*" hidden>
+
+<!-- ====================================================== modals -->
+<div id="modal-export" class="modal hidden">
+  <div class="box modal-box">
+    <div class="box-title"><span id="exp-title">making gif</span><span class="dim">esc to close</span></div>
+    <div id="exp-progress">
+      <pre id="exp-bar" class="bar"></pre>
+      <p id="exp-stage" class="dim"></p>
+      <button class="btn" data-action="export-cancel">[ esc cancel ]</button>
+    </div>
+    <div id="exp-result" class="hidden">
+      <div class="result-img"><img id="exp-img" alt="your gif"></div>
+      <p id="exp-meta"></p>
+      <div class="row center">
+        <a id="exp-download" class="btn primary" download>[ &#x23CE; download ]</a>
+        <button class="btn" data-action="export-close">[ esc back to editing ]</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modal-help" class="modal hidden">
+  <div class="box modal-box help">
+    <div class="box-title"><span>keyboard</span><span class="dim">esc to close</span></div>
+    <div class="help-cols">
+      <dl>
+        <dt>timeline</dt>
+        <dd><kbd>space</kbd> play / pause selection</dd>
+        <dd><kbd>&lt;</kbd> <kbd>&gt;</kbd> (or <kbd>,</kbd> <kbd>.</kbd>) step one gif frame</dd>
+        <dd><kbd>j</kbd> <kbd>l</kbd> step one second</dd>
+        <dd><kbd>i</kbd> / <kbd>o</kbd> set start / end at playhead</dd>
+        <dd><kbd>home</kbd> / <kbd>end</kbd> jump to start / end</dd>
+        <dd>type times as <code>12.5</code> or <code>1:02.5</code></dd>
+        <dt>output</dt>
+        <dd><kbd>c</kbd> crop the video</dd>
+        <dd><kbd>e</kbd> make the gif</dd>
+        <dd><kbd>v</kbd> open another video</dd>
+      </dl>
+      <dl>
+        <dt>layers</dt>
+        <dd><kbd>t</kbd> add text &middot; <kbd>p</kbd> add image (or drop / paste one)</dd>
+        <dd><kbd>tab</kbd> select next layer &middot; <kbd>esc</kbd> deselect</dd>
+        <dd>drag to move &middot; corner handle resizes &middot; top handle rotates</dd>
+        <dd><kbd>&larr;&uarr;&darr;&rarr;</kbd> nudge (<kbd>shift</kbd> = 10&times;)</dd>
+        <dd><kbd>+</kbd> / <kbd>-</kbd> bigger / smaller</dd>
+        <dd><kbd>r</kbd> / <kbd>R</kbd> rotate 15&deg; (hold <kbd>shift</kbd> while dragging to snap)</dd>
+        <dd><kbd>del</kbd> delete layer &middot; <kbd>ctrl</kbd>+<kbd>d</kbd> duplicate</dd>
+      </dl>
+    </div>
+  </div>
+</div>
+
+<script src="js/gif-encoder.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
