@@ -1,7 +1,7 @@
 # gifsonic
 
-A little Linux app for turning videos into GIFs. It looks like a terminal
-program, but you can do everything with the mouse too.
+A Linux app for turning videos into GIFs. It looks like a terminal
+program (but you can do everything with the mouse too).
 
 ![gifsonic](docs/screenshot.png)
 
@@ -13,23 +13,16 @@ You can drag the start and end handles on the timeline, or type exact times
 like `12.5` or `1:02.5`. <kbd>&lt;</kbd> and <kbd>&gt;</kbd> step one frame
 at a time. Frame rate goes from 5 to 50 fps, and the width can be 100, 160,
 260, 320, 360, 480, 640 or 800 px, or anything you type in. Crop by dragging
-on the preview, either freely or locked to 1:1, 4:3, 16:9 or 9:16.
+on the preview, either freeform or locked to 1:1, 4:3, 16:9 or 9:16.
 
-You can put text and images on top. Drag them to move, resize or rotate them
+You can add text and images. Drag them to move, resize or rotate them
 (the keyboard works too), trim their edges, and change opacity or stacking
-order. Text gets a font, bold/italic, alignment, colour, an outline and an
-optional background box. Each layer can show for only part of the GIF, with a
+order. Each layer can show for only part of the GIF, with a
 fade in or out if you want one.
 
-Clicking a text or image in the preview switches the timeline and crop over
-to that item, so the handles set when it shows up and crop trims the item
-itself. Click empty space or press <kbd>g</kbd> to go back to the GIF. You
-can also slide a whole span along the timeline by dragging its top edge.
-
-GIFs come out small. gifsonic has its own encoder with a shared palette,
+gifsonic has its own encoder with a shared palette,
 optional dithering, and it only stores the pixels that change between frames.
-Everything stays on your computer, and if you try to close it before saving a
-GIF, it asks first.
+Everything stays on your computer
 
 ## Install
 
@@ -80,4 +73,4 @@ Press <kbd>?</kbd> in the app to see these.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT: see [LICENSE](LICENSE).
