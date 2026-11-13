@@ -222,6 +222,25 @@ input[type=range]:focus { outline: none; }
 .tl-layer {
   position: absolute; bottom: 1px; height: 4px; background: var(--accent2); opacity: .85; pointer-events: none;
 }
+/* grip on the top edge of the span being edited: drag it to slide the span */
+.tl-range::before, .tl-track.item-mode .tl-layer::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 6px;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 2px, transparent 2px 5px); opacity: .55;
+}
+/* editing an item: its span becomes the main highlight, the gif clip fades back */
+.tl-track.item-mode .tl-range { background: rgba(245, 194, 231, 0.07); border-top-color: rgba(245, 194, 231, .3); border-bottom-color: rgba(245, 194, 231, .3); }
+.tl-track.item-mode .tl-range::before { display: none; }
+.tl-track.item-mode .tl-layer {
+  top: 0; bottom: 0; height: auto; opacity: 1;
+  background: rgba(137, 180, 250, 0.22);
+  border-top: 2px solid var(--accent2); border-bottom: 2px solid var(--accent2);
+}
+.tl-track.item-mode .tl-layer::before { background: repeating-linear-gradient(90deg, var(--accent2) 0 2px, transparent 2px 5px); }
+.tl-track.item-mode .tl-handle { background: var(--accent2); }
+.seg button:disabled { opacity: .35; cursor: not-allowed; }
+.crop-gif-controls { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.credit { margin: 18px 0 0; text-align: center; color: var(--dim); font-size: 12px; }
+.credit .heart { color: var(--accent); }
 .tl-range {
   position: absolute; top: 0; bottom: 0;
   background: rgba(245, 194, 231, 0.22);

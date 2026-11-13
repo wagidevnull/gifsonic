@@ -25,7 +25,8 @@
     loaded: false, fileName: '', dur: 0, vw: 0, vh: 0,
     pos: 0, start: 0, end: 0,
     fps: 15, width: 360, colors: 256, dither: true, loop: 0,
-    crop: { x: 0, y: 0, w: 16, h: 9 }, cropMode: false, cropAspect: null,
+    crop: { x: 0, y: 0, w: 16, h: 9 }, cropMode: false /* false | 'gif' | 'item' */, cropAspect: null,
+    target: 'gif', // what the timeline & crop edit: 'gif' or the selected 'item'
     layers: [], sel: null, playing: false,
     objUrl: null, job: null, local: false, nextId: 1,
   };
@@ -329,6 +330,7 @@
       // keep the visible part in place when trimming a side
       ox: ((c.l - c.r) * sw * s) / 2, oy: ((c.t - c.b) * sh * s) / 2,
       dw: cw * s, dh: ch * s, rot: L.rot * DEG,
+      srcW: sw, srcH: sh, fullW: sw * s, fullH: sh * s,
     };
   }
 
@@ -414,13 +416,23 @@
   }
   const selLayer = () => S.layers.find((l) => l.id === S.sel) || null;
   function select(id) {
+    if (S.cropMode === 'item' && id !== S.sel) { S.cropMode = false; $('#crop-bar').classList.add('hidden'); }
     S.sel = id;
+    S.target = id ? 'item' : 'gif'; // picking an item edits the item; clicking empty space edits the gif
+    refreshAll();
+  }
+  const itemTarget = () => (S.target === 'item' ? selLayer() : null);
+  function setTarget(t) {
+    if (t === 'item' && !selLayer()) { status('select a text or image in the preview first'); return; }
+    if (S.cropMode === 'item' && t === 'gif') setCropMode(false);
+    S.target = t;
+    status(t === 'item' ? 'timeline & crop now edit the selected item' : 'timeline & crop now edit the gif');
     refreshAll();
   }
   function deleteLayer(L) {
     if (!L) return;
     S.layers = S.layers.filter((l) => l !== L);
-    if (S.sel === L.id) S.sel = null;
+    if (S.sel === L.id) { S.sel = null; S.target = 'gif'; if (S.cropMode === 'item') setCropMode(false); }
     refreshAll();
   }
   function duplicateLayer(L) {
@@ -449,7 +461,7 @@
     const sw = Math.max(50, stage.clientWidth - 24), sh = Math.max(50, stage.clientHeight - 24);
     let aw = 16, ah = 9;
     if (S.loaded) {
-      if (S.cropMode) { aw = S.vw; ah = S.vh; } else { aw = S.crop.w; ah = S.crop.h; }
+      if (S.cropMode === 'gif') { aw = S.vw; ah = S.vh; } else { aw = S.crop.w; ah = S.crop.h; }
     }
     const k = Math.min(sw / aw, sh / ah);
     view.w = Math.max(1, Math.floor(aw * k));
@@ -468,12 +480,66 @@
     ctx.clearRect(0, 0, view.w, view.h);
     if (!S.loaded) return;
     ctx.imageSmoothingQuality = 'high';
-    if (S.cropMode) return drawCropMode();
+    if (S.cropMode === 'gif') return drawCropMode();
     const c = S.crop;
     ctx.drawImage(video, c.x, c.y, c.w, c.h, 0, 0, view.w, view.h);
     for (const L of S.layers) drawLayer(ctx, L, view.w, view.h, S.pos, L.id === S.sel ? 0.25 : 0);
     const L = selLayer();
-    if (L && !L.hidden) drawSelection(L);
+    if (L && S.cropMode === 'item') drawItemCrop(L);
+    else if (L && !L.hidden) drawSelection(L);
+  }
+
+  // ---- visual crop of the selected item
+  function itemCropFrame(L) {
+    const g = geom(L, view.w, view.h);
+    if (!g) return null;
+    const W = g.fullW, H = g.fullH, c = L.crop;
+    return { g, W, H, x0: -W / 2 + c.l * W, x1: W / 2 - c.r * W, y0: -H / 2 + c.t * H, y1: H / 2 - c.b * H };
+  }
+  // screen -> unrotated coords around the item's pivot (its uncropped centre)
+  function toPivot(g, px, py) {
+    const dx = px - g.cx, dy = py - g.cy, co = Math.cos(g.rot), si = Math.sin(g.rot);
+    return { x: dx * co + dy * si, y: -dx * si + dy * co };
+  }
+  function drawItemCrop(L) {
+    const f = itemCropFrame(L);
+    if (!f) return;
+    const { g, W, H, x0, x1, y0, y1 } = f;
+    ctx.save();
+    ctx.translate(g.cx, g.cy);
+    ctx.rotate(g.rot);
+    // the trimmed-away parts, ghosted
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-W / 2, -H / 2, W, H);
+    ctx.rect(x0, y0, x1 - x0, y1 - y0);
+    ctx.clip('evenodd');
+    ctx.globalAlpha = 0.3;
+    ctx.drawImage(g.src, 0, 0, g.srcW, g.srcH, -W / 2, -H / 2, W, H);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(205,214,244,0.45)';
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(-W / 2, -H / 2, W, H);
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#89b4fa';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.fillStyle = '#89b4fa';
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    for (const [hx, hy] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [mx, y0], [mx, y1], [x0, my], [x1, my]]) ctx.fillRect(hx - 4, hy - 4, 8, 8);
+    ctx.restore();
+  }
+  function itemCropHit(L, p) {
+    const f = itemCropFrame(L);
+    if (!f) return null;
+    const q = toPivot(f.g, p.x, p.y);
+    const near = (a, b) => Math.abs(a - b) <= HANDLE;
+    const inX = q.x >= f.x0 - HANDLE && q.x <= f.x1 + HANDLE, inY = q.y >= f.y0 - HANDLE && q.y <= f.y1 + HANDLE;
+    let part = '';
+    if (inX && near(q.y, f.y0)) part += 'n'; else if (inX && near(q.y, f.y1)) part += 's';
+    if (inY && near(q.x, f.x0)) part += 'w'; else if (inY && near(q.x, f.x1)) part += 'e';
+    if (!part && q.x > f.x0 && q.x < f.x1 && q.y > f.y0 && q.y < f.y1) part = 'move';
+    return part ? { f, part, q } : null;
   }
 
   function drawSelection(L) {
@@ -580,7 +646,12 @@
     if (!S.loaded || e.button !== 0) return;
     const p = canvasPoint(e);
     canvas.setPointerCapture(e.pointerId);
-    if (S.cropMode) {
+    if (S.cropMode === 'item') {
+      const L = selLayer(), hit = L && itemCropHit(L, p);
+      if (hit) drag = { kind: 'icrop', L, part: hit.part, q0: hit.q, g0: hit.f.g, W: hit.f.W, H: hit.f.H, c0: Object.assign({}, L.crop) };
+      return;
+    }
+    if (S.cropMode === 'gif') {
       const k = view.w / S.vw, part = cropHit(p), c = S.crop;
       const anchors = { nw: [c.x + c.w, c.y + c.h], ne: [c.x, c.y + c.h], sw: [c.x + c.w, c.y], se: [c.x, c.y] };
       if (part === 'move') drag = { kind: 'crop-move', p0: p, c0: Object.assign({}, c) };
@@ -608,6 +679,26 @@
     if (!S.loaded) return;
     const p = canvasPoint(e);
     if (!drag) { hoverCursor(p); return; }
+    if (drag.kind === 'icrop') {
+      const { L, part, c0, W, H } = drag, MIN = 0.05;
+      const q = toPivot(drag.g0, p.x, p.y);
+      const fx = (q.x + W / 2) / W, fy = (q.y + H / 2) / H;
+      const c = Object.assign({}, c0);
+      if (part === 'move') {
+        const dx = (q.x - drag.q0.x) / W, dy = (q.y - drag.q0.y) / H;
+        c.l = clamp(c0.l + dx, 0, c0.l + c0.r); c.r = c0.r - (c.l - c0.l);
+        c.t = clamp(c0.t + dy, 0, c0.t + c0.b); c.b = c0.b - (c.t - c0.t);
+      } else {
+        if (part.includes('w')) c.l = clamp(fx, 0, 1 - c.r - MIN);
+        if (part.includes('e')) c.r = clamp(1 - fx, 0, 1 - c.l - MIN);
+        if (part.includes('n')) c.t = clamp(fy, 0, 1 - c.b - MIN);
+        if (part.includes('s')) c.b = clamp(1 - fy, 0, 1 - c.t - MIN);
+      }
+      L.crop = c;
+      refreshProps();
+      draw();
+      return;
+    }
     if (drag.kind.startsWith('crop')) {
       const k = view.w / S.vw;
       if (drag.kind === 'crop-move') {
@@ -643,7 +734,11 @@
 
   function hoverCursor(p) {
     let cur = 'default';
-    if (S.cropMode) {
+    if (S.cropMode === 'item') {
+      const L = selLayer(), h = L && itemCropHit(L, p);
+      const cursors = { n: 'ns-resize', s: 'ns-resize', w: 'ew-resize', e: 'ew-resize', nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', move: 'move' };
+      cur = h ? cursors[h.part] : 'default';
+    } else if (S.cropMode === 'gif') {
       const h = cropHit(p);
       cur = h === 'move' ? 'move' : h === 'new' ? 'crosshair' : (h === 'nw' || h === 'se') ? 'nwse-resize' : 'nesw-resize';
     } else {
@@ -656,12 +751,19 @@
   }
 
   // ------------------------------------------------------------ crop mode
-  function setCropMode(on) {
+  /** mode: false | 'gif' (crop the video) | 'item' (trim the selected text/image) */
+  function setCropMode(mode) {
     if (!S.loaded) return;
+    if (mode === true) mode = itemTarget() ? 'item' : 'gif';
+    if (mode === 'item' && !selLayer()) mode = 'gif';
     stopPlay();
-    S.cropMode = on;
-    $('#crop-bar').classList.toggle('hidden', !on);
-    if (on) select(null);
+    if (mode === 'gif') { S.sel = null; S.target = 'gif'; }
+    if (mode === 'item') S.target = 'item';
+    S.cropMode = mode;
+    $('#crop-bar').classList.toggle('hidden', !mode);
+    $('#crop-gif-controls').classList.toggle('hidden', mode !== 'gif');
+    $('#crop-bar-title').textContent = mode === 'item' ? 'CROP ITEM' : 'CROP GIF';
+    $('#crop-bar-hint').textContent = mode === 'item' ? 'drag the blue edges or corners · drag inside to slide' : 'drag on the video · aspect';
     layout();
     refreshAll();
   }
@@ -714,7 +816,25 @@
     }
   }
 
+  /** The time span the timeline is editing: the gif clip, or the selected item's show-from/to. */
+  function span() {
+    const L = itemTarget();
+    if (L) return [L.from != null ? L.from : S.start, L.to != null ? L.to : S.end];
+    return [S.start, S.end];
+  }
+  function setSpan(a, b) {
+    const L = itemTarget();
+    if (L) { L.from = a; L.to = b; } else { S.start = a; S.end = b; }
+  }
+  function nudgeSpan(frames) {
+    const [a, b] = span(), len = b - a;
+    const na = clamp(a + frames / S.fps, 0, S.dur - len);
+    setSpan(na, na + len);
+    refreshAll();
+  }
+
   let tlDrag = null;
+  const GRIP = 9; // px: top band of the highlighted span that moves it
   function timeAt(e) {
     const r = track.getBoundingClientRect();
     return clamp(((e.clientX - r.left) / r.width) * S.dur, 0, S.dur);
@@ -725,9 +845,14 @@
     track.setPointerCapture(e.pointerId);
     const r = track.getBoundingClientRect();
     const px = (t) => r.left + (t / S.dur) * r.width;
-    if (Math.abs(e.clientX - px(S.start)) <= 8) tlDrag = 'start';
-    else if (Math.abs(e.clientX - px(S.end)) <= 8) tlDrag = 'end';
-    else tlDrag = 'pos';
+    const [a, b] = span();
+    if (Math.abs(e.clientX - px(a)) <= 8) tlDrag = 'start';
+    else if (Math.abs(e.clientX - px(b)) <= 8) tlDrag = 'end';
+    else if (e.clientY - r.top <= GRIP && e.clientX > px(a) && e.clientX < px(b)) {
+      tlDrag = { kind: 'move', t0: timeAt(e), a0: a, b0: b };
+      track.style.cursor = 'grabbing';
+      return;
+    } else tlDrag = 'pos';
     tlMove(e);
   });
   track.addEventListener('pointermove', (e) => {
@@ -735,22 +860,43 @@
     else if (S.loaded) {
       const r = track.getBoundingClientRect();
       const px = (t) => r.left + (t / S.dur) * r.width;
-      const near = Math.abs(e.clientX - px(S.start)) <= 8 || Math.abs(e.clientX - px(S.end)) <= 8;
-      track.style.cursor = near ? 'ew-resize' : 'pointer';
+      const [a, b] = span();
+      const near = Math.abs(e.clientX - px(a)) <= 8 || Math.abs(e.clientX - px(b)) <= 8;
+      const grip = e.clientY - r.top <= GRIP && e.clientX > px(a) && e.clientX < px(b);
+      track.style.cursor = near ? 'ew-resize' : grip ? 'grab' : 'pointer';
     }
   });
   track.addEventListener('pointerup', () => { tlDrag = null; });
   track.addEventListener('pointercancel', () => { tlDrag = null; });
   function tlMove(e) {
     const t = timeAt(e);
-    if (tlDrag === 'start') { S.start = clamp(t, 0, S.end - minDur()); seek(S.start); }
-    else if (tlDrag === 'end') { S.end = clamp(t, S.start + minDur(), S.dur); seek(S.end); }
+    const [a, b] = span();
+    if (tlDrag && tlDrag.kind === 'move') {
+      const len = tlDrag.b0 - tlDrag.a0;
+      const na = clamp(tlDrag.a0 + (t - tlDrag.t0), 0, S.dur - len);
+      setSpan(na, na + len);
+    } else if (tlDrag === 'start') { setSpan(clamp(t, 0, b - minDur()), b); seek(span()[0]); }
+    else if (tlDrag === 'end') { setSpan(a, clamp(t, a + minDur(), S.dur)); seek(span()[1]); }
     else seek(t);
     refreshAll();
   }
+  track.addEventListener('pointerup', () => { if (tlDrag && tlDrag.kind === 'move') track.style.cursor = 'grab'; });
 
-  function setStart(t) { S.start = clamp(t, 0, Math.max(0, S.end - minDur())); if (S.end - S.start < minDur()) S.end = Math.min(S.dur, S.start + minDur()); refreshAll(); }
-  function setEnd(t) { S.end = clamp(t, Math.min(S.dur, S.start + minDur()), S.dur); refreshAll(); }
+  // start/end setters follow the edit target (gif clip or selected item)
+  function setStart(t) {
+    const [a, b] = span(), len = b - a;
+    t = clamp(t, 0, S.dur);
+    if (b - t < minDur()) setSpan(t, Math.min(S.dur, t + Math.max(len, minDur())));
+    else setSpan(t, b);
+    refreshAll();
+  }
+  function setEnd(t) {
+    const [a, b] = span(), len = b - a;
+    t = clamp(t, 0, S.dur);
+    if (t - a < minDur()) setSpan(Math.max(0, t - Math.max(len, minDur())), t);
+    else setSpan(a, t);
+    refreshAll();
+  }
 
   // ------------------------------------------------------------ export
   function drawScaled(c2d, src, sx, sy, sw, sh, dw, dh) {
@@ -924,14 +1070,21 @@
     $('#play-btn').innerHTML = S.playing ? '[ &#x275A;&#x275A; pause ]' : '[ &#x25B6; play ]';
   }
   function refreshTimeline() {
-    setVal('t-start', fmtTime(S.start));
-    setVal('t-end', fmtTime(S.end));
-    setVal('t-dur', (S.end - S.start).toFixed(2) + 's');
+    const [a, b] = span(), item = !!itemTarget();
+    setVal('t-start', fmtTime(a));
+    setVal('t-end', fmtTime(b));
+    setVal('t-dur', (b - a).toFixed(2) + 's');
+    $('#lbl-start').textContent = item ? 'from' : 'start';
+    $('#lbl-end').textContent = item ? 'to' : 'end';
+    track.classList.toggle('item-mode', item);
+    setSeg('#target-seg', 'target', item ? 'item' : 'gif');
+    $('#target-seg [data-target=item]').disabled = !selLayer();
     $('#tl-range').style.left = timeToPct(S.start) + '%';
     $('#tl-range').style.width = timeToPct(S.end - S.start) + '%';
-    $('#tl-h-start').style.left = timeToPct(S.start) + '%';
-    $('#tl-h-end').style.left = timeToPct(S.end) + '%';
-    $('#tl-info').textContent = S.loaded ? `${frameCount()} frames @ ${S.fps} fps` : '';
+    $('#tl-h-start').style.left = timeToPct(a) + '%';
+    $('#tl-h-end').style.left = timeToPct(b) + '%';
+    $('#tl-info').textContent = S.loaded
+      ? (item ? 'editing: item \u00b7 ' : 'editing: gif \u00b7 ') + `${frameCount()} frames @ ${S.fps} fps` : '';
     const L = selLayer(), bar = $('#tl-layer');
     bar.classList.toggle('hidden', !L || !S.loaded);
     if (L && S.loaded) {
@@ -960,10 +1113,10 @@
     refreshOutput();
   }
   function refreshPreviewTitle() {
-    $('#preview-title').textContent = S.cropMode ? 'crop' : 'preview';
+    $('#preview-title').textContent = S.cropMode === 'item' ? 'crop item' : S.cropMode ? 'crop gif' : 'preview';
     if (!S.loaded) { $('#preview-info').textContent = ''; return; }
     const { w, h } = outSize();
-    $('#preview-info').textContent = S.cropMode
+    $('#preview-info').textContent = S.cropMode === 'gif'
       ? `${S.crop.w}×${S.crop.h} of ${S.vw}×${S.vh}`
       : `gif will be ${w}×${h}`;
   }
@@ -1121,6 +1274,10 @@
   $('#dither').addEventListener('change', (e) => { S.dither = e.target.checked; savePrefs(); });
   $('#loop').addEventListener('change', (e) => { S.loop = +e.target.value; savePrefs(); });
 
+  $('#target-seg').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    setTarget(b.dataset.target);
+  });
   $('#crop-aspect').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     setCropAspect(b.dataset.aspect === 'free' ? null : parseFloat(b.dataset.aspect));
@@ -1154,7 +1311,7 @@
   timeInput('t-pos', (v) => { stopPlay(); seek(v); });
   timeInput('t-start', (v) => { setStart(v); seek(S.start); });
   timeInput('t-end', (v) => { setEnd(v); seek(S.end); });
-  timeInput('t-dur', (v) => setEnd(S.start + v));
+  timeInput('t-dur', (v) => setEnd(span()[0] + v));
 
   // layer show-from / show-to / fades
   for (const [id, key] of [['lp-from', 'from'], ['lp-to', 'to']]) {
@@ -1203,9 +1360,13 @@
     'frame-fwd': () => step(1),
     'set-start': () => setStart(S.pos),
     'set-end': () => setEnd(S.pos),
-    crop: () => setCropMode(!S.cropMode),
+    crop: () => setCropMode(S.cropMode === 'gif' ? false : 'gif'),
+    'layer-crop': () => setCropMode(S.cropMode === 'item' ? false : 'item'),
     'crop-done': () => setCropMode(false),
-    'crop-reset': () => { S.crop = { x: 0, y: 0, w: S.vw, h: S.vh }; S.cropAspect = null; refreshCrop(); draw(); },
+    'crop-reset': () => {
+      if (S.cropMode === 'item') { const L = selLayer(); if (L) L.crop = { l: 0, t: 0, r: 0, b: 0 }; refreshProps(); draw(); return; }
+      S.crop = { x: 0, y: 0, w: S.vw, h: S.vh }; S.cropAspect = null; refreshCrop(); draw();
+    },
     export: exportGif,
     'export-cancel': closeExport,
     'export-close': closeExport,
@@ -1292,7 +1453,10 @@
         case 'o': case ']': setEnd(S.pos); return true;
         case 'Home': stopPlay(); seek(S.start); return true;
         case 'End': stopPlay(); seek(S.end); return true;
-        case 'c': setCropMode(!S.cropMode); return true;
+        case 'c': setCropMode(S.cropMode ? false : true); return true;
+        case 'g': setTarget(itemTarget() ? 'gif' : 'item'); return true;
+        case '{': nudgeSpan(-1); return true;
+        case '}': nudgeSpan(1); return true;
         case 'Enter': if (S.cropMode) { setCropMode(false); return true; } return false;
         case 't': ACTIONS['add-text'](); return true;
         case 'p': ACTIONS['add-image'](); return true;

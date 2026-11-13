@@ -37,8 +37,9 @@
         </div>
       </div>
       <div id="crop-bar" class="crop-bar hidden">
-        <span class="accent">CROP</span>
-        <span class="dim">drag on the video &middot; aspect</span>
+        <span class="accent" id="crop-bar-title">CROP GIF</span>
+        <span class="dim" id="crop-bar-hint">drag on the video &middot; aspect</span>
+        <span id="crop-gif-controls" class="crop-gif-controls">
         <span class="seg" id="crop-aspect">
           <button data-aspect="free" class="on">free</button><button data-aspect="1">1:1</button><button data-aspect="1.3333">4:3</button><button data-aspect="1.7778">16:9</button><button data-aspect="0.5625">9:16</button>
         </span>
@@ -46,6 +47,7 @@
         <span class="dim">y</span><input class="num" id="crop-y" type="number" min="0">
         <span class="dim">w</span><input class="num" id="crop-w" type="number" min="16">
         <span class="dim">h</span><input class="num" id="crop-h" type="number" min="16">
+        </span>
         <button class="btn" data-action="crop-reset">[ reset ]</button>
         <button class="btn primary" data-action="crop-done">[ done &#x23CE; ]</button>
       </div>
@@ -62,9 +64,12 @@
           <span class="dim">@</span><input id="t-pos" class="time" type="text" value="0:00.00">
         </label>
         <span class="sep">&#x2502;</span>
-        <label class="field"><span class="dim">start</span><input id="t-start" class="time" type="text"></label>
+        <span class="dim">edit</span>
+        <span class="seg" id="target-seg" title="What the timeline and crop change: the whole gif, or the item selected in the preview"><button data-target="gif">gif</button><button data-target="item">item</button></span><span class="hk" title="press g to switch">g</span>
+        <span class="sep">&#x2502;</span>
+        <label class="field"><span class="dim" id="lbl-start">start</span><input id="t-start" class="time" type="text"></label>
         <button class="btn small" data-action="set-start" title="Set start to the playhead">[ set ]<span class="hk">i</span></button>
-        <label class="field"><span class="dim">end</span><input id="t-end" class="time" type="text"></label>
+        <label class="field"><span class="dim" id="lbl-end">end</span><input id="t-end" class="time" type="text"></label>
         <button class="btn small" data-action="set-end" title="Set end to the playhead">[ set ]<span class="hk">o</span></button>
         <label class="field"><span class="dim">duration</span><input id="t-dur" class="time" type="text"></label>
       </div>
@@ -178,7 +183,7 @@
             <button class="btn small" data-action="layer-whole" title="Show for the whole gif">[ whole gif ]</button>
           </div>
           <div class="hr"></div>
-          <div class="row"><span class="label">crop</span><span class="dim">trim each side of the layer</span></div>
+          <div class="row"><span class="label">crop</span><span class="dim">trim each side</span><span class="spacer"></span><button class="btn small" data-action="layer-crop" title="Crop this item by dragging its edges in the preview">[ crop on preview ]<span class="hk">c</span></button></div>
           <div class="row"><span class="label dim">left</span><input type="range" id="lp-cl" min="0" max="0.95" step="0.005"><span class="label dim">right</span><input type="range" id="lp-cr" min="0" max="0.95" step="0.005"></div>
           <div class="row"><span class="label dim">top</span><input type="range" id="lp-ct" min="0" max="0.95" step="0.005"><span class="label dim">bottom</span><input type="range" id="lp-cb" min="0" max="0.95" step="0.005"></div>
           <div class="row">
@@ -194,7 +199,7 @@
 
   <footer class="keys" id="keys">
     <span><kbd>spc</kbd>play</span><span><kbd>&lt; &gt;</kbd>frame</span><span><kbd>j l</kbd>&plusmn;1s</span>
-    <span><kbd>i o</kbd>start/end</span><span><kbd>c</kbd>crop</span><span><kbd>t</kbd>text</span><span><kbd>p</kbd>image</span>
+    <span><kbd>i o</kbd>start/end</span><span><kbd>g</kbd>gif/item</span><span><kbd>c</kbd>crop</span><span><kbd>t</kbd>text</span><span><kbd>p</kbd>image</span>
     <span><kbd>tab</kbd>next layer</span><span><kbd>&larr;&uarr;&darr;&rarr;</kbd>move</span><span><kbd>e</kbd>make gif</span><span><kbd>?</kbd>help</span>
     <span class="spacer"></span><span id="status" class="dim"></span>
   </footer>
@@ -247,6 +252,8 @@
         <dd><kbd>&lt;</kbd> <kbd>&gt;</kbd> (or <kbd>,</kbd> <kbd>.</kbd>) step one gif frame</dd>
         <dd><kbd>j</kbd> <kbd>l</kbd> step one second</dd>
         <dd><kbd>i</kbd> / <kbd>o</kbd> set start / end at playhead</dd>
+        <dd>drag the top edge of the highlighted span to slide it &middot; <kbd>{</kbd> <kbd>}</kbd> nudge it a frame</dd>
+        <dd><kbd>g</kbd> switch between editing the <em>gif</em> and the selected <em>item</em></dd>
         <dd><kbd>home</kbd> / <kbd>end</kbd> jump to start / end</dd>
         <dd>type times as <code>12.5</code> or <code>1:02.5</code></dd>
         <dt>output</dt>
@@ -263,9 +270,10 @@
         <dd><kbd>+</kbd> / <kbd>-</kbd> bigger / smaller</dd>
         <dd><kbd>r</kbd> / <kbd>R</kbd> rotate 15&deg; (hold <kbd>shift</kbd> while dragging to snap)</dd>
         <dd><kbd>del</kbd> delete layer &middot; <kbd>ctrl</kbd>+<kbd>d</kbd> duplicate</dd>
-        <dd>set when a layer shows under <em>show</em> in its settings</dd>
+        <dd>with an item selected, the timeline sets when it shows and <kbd>c</kbd> crops it</dd>
       </dl>
     </div>
+    <p class="credit">made with <span class="heart">&#x2661;</span> in vancouver by wagi</p>
   </div>
 </div>
 

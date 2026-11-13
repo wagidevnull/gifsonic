@@ -17,6 +17,10 @@ use with a mouse.
   Text has font, bold/italic, alignment, colour, outline and background box.
 - **Layer timing**: choose when each text/image appears and disappears, with
   optional fade in / fade out.
+- **Edit the gif or an item**: click a text/image in the preview and the
+  timeline handles set *when it shows*, and crop trims *it*; click empty space
+  (or press <kbd>g</kbd>) to go back to editing the gif. Drag the top edge of a
+  highlighted span to slide it along the timeline.
 - **Good, small GIFs**: built-in encoder with a shared palette, optional
   dithering, and frame-to-frame optimisation (only changed pixels are stored).
 - **Private**: everything runs on your computer. Nothing is uploaded.
@@ -63,7 +67,9 @@ of saved to `~/Pictures/gifsonic`.
 | <kbd>&lt;</kbd> <kbd>&gt;</kbd> (or <kbd>,</kbd> <kbd>.</kbd>) | step one GIF frame |
 | <kbd>j</kbd> <kbd>l</kbd> | step one second |
 | <kbd>i</kbd> / <kbd>o</kbd> | set start / end at the playhead |
-| <kbd>c</kbd> | crop |
+| <kbd>g</kbd> | switch between editing the gif and the selected item |
+| <kbd>{</kbd> <kbd>}</kbd> | slide the span being edited by one frame |
+| <kbd>c</kbd> | crop the gif, or the selected item |
 | <kbd>t</kbd> / <kbd>p</kbd> | add text / image layer (you can also drop or paste images) |
 | <kbd>tab</kbd> | select next layer |
 | arrows | nudge layer (<kbd>shift</kbd> = 10 px) |
