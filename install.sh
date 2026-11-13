@@ -76,7 +76,9 @@ chmod +x "$DEST/gifsonic"
 ln -sf "$DEST/gifsonic" "$BIN/gifsonic"
 cp icons/gifsonic.svg "$ICONS/scalable/apps/gifsonic.svg"
 cp icons/gifsonic-256.png "$ICONS/256x256/apps/gifsonic.png"
-cp gifsonic.desktop "$APPS/gifsonic.desktop"
+# Use the full path: app launchers (e.g. ones that start apps via systemd)
+# often don't have ~/.local/bin on their PATH.
+sed "s|^Exec=gifsonic|Exec=$BIN/gifsonic|" gifsonic.desktop > "$APPS/gifsonic.desktop"
 refresh_desktop
 
 if native_ok; then mode="native window"; else mode="browser window"; fi
