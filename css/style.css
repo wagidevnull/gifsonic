@@ -113,7 +113,7 @@ code { color: var(--accent2); }
   background: var(--panel);
 }
 .empty:hover .logo { color: var(--fg); }
-.logo { color: var(--accent); margin: 0 0 18px; font-size: 13px; line-height: 1.15; transition: color .2s; }
+.logo { color: var(--accent); margin: 0 0 18px; font-size: 13px; line-height: 1.15; transition: color .2s; text-align: left; white-space: pre; }
 .empty p { margin: 4px 0; }
 
 .crop-bar {
@@ -134,6 +134,13 @@ button, .btn, input, select, textarea { font: inherit; color: inherit; }
 .btn.danger:hover { background: var(--danger); }
 .btn.small { font-size: 12px; padding: 1px 3px; }
 .btn.wide { display: block; width: 100%; margin-top: 8px; padding: 5px; border: 1px solid var(--accent); }
+/* keyboard shortcut badge inside a button: [ make gif ] e */
+.hk {
+  display: inline-block; margin-left: 6px; padding: 0 4px; min-width: 1.4em; text-align: center;
+  font-size: 11px; line-height: 1.35; font-weight: normal;
+  color: var(--dim); border: 1px solid var(--line); border-radius: 2px; vertical-align: 1px;
+}
+.btn:hover .hk, .btn:focus-visible .hk { color: inherit; border-color: currentColor; }
 
 input[type=text], input[type=number], select, textarea {
   background: var(--bg); border: 0; border-bottom: 1px solid var(--line);
@@ -205,10 +212,15 @@ input[type=range]:focus { outline: none; }
 .tl-ruler span { position: absolute; top: 0; white-space: nowrap; }
 .tl-track {
   position: relative; height: 30px; cursor: pointer;
-  background:
-    repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 8px) 0 50% / 100% 9px no-repeat,
-    var(--bg);
+  background: var(--bg);
   border: 1px solid var(--line);
+}
+/* tick marks are placed on whole pixels by JS so none get lost to anti-aliasing */
+.tl-ticks { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.tl-ticks i { position: absolute; top: 50%; width: 1px; height: 7px; margin-top: -3px; background: var(--line); }
+.tl-ticks i.major { height: 13px; margin-top: -6px; background: var(--line-hi); }
+.tl-layer {
+  position: absolute; bottom: 1px; height: 4px; background: var(--accent2); opacity: .85; pointer-events: none;
 }
 .tl-range {
   position: absolute; top: 0; bottom: 0;

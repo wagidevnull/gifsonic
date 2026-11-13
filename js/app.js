@@ -161,6 +161,8 @@
     S.crop = { x: 0, y: 0, w: S.vw, h: S.vh };
     S.cropMode = false;
     S.loaded = true;
+    S.saved = false;
+    syncDirty();
     $('#empty').classList.add('hidden');
     canvas.classList.remove('hidden');
     $('#file-label').textContent = `${file.name}  ${S.vw}×${S.vh}  ${fmtTime(S.dur)}`;
@@ -330,12 +332,27 @@
     };
   }
 
-  function drawLayer(c2d, L, OW, OH) {
+  /** Opacity of a layer at time t: its own opacity x show-from/to x fades. */
+  function layerAlpha(L, t) {
+    if (L.hidden) return 0;
+    if (L.from != null && t < L.from - 1e-6) return 0;
+    if (L.to != null && t >= L.to - 1e-6) return 0;
+    const a = L.from != null ? L.from : S.start, b = L.to != null ? L.to : S.end;
+    let f = 1;
+    if (L.fadeIn > 0) f = Math.min(f, (t - a) / L.fadeIn);
+    if (L.fadeOut > 0) f = Math.min(f, (b - t) / L.fadeOut);
+    return L.opacity * clamp(f, 0, 1);
+  }
+  const isTimed = (L) => L.from != null || L.to != null || L.fadeIn > 0 || L.fadeOut > 0;
+
+  function drawLayer(c2d, L, OW, OH, t, minAlpha = 0) {
     if (L.hidden) return;
+    const alpha = Math.max(layerAlpha(L, t), minAlpha);
+    if (alpha <= 0) return;
     const g = geom(L, OW, OH);
     if (!g) return;
     c2d.save();
-    c2d.globalAlpha = L.opacity;
+    c2d.globalAlpha = alpha;
     c2d.translate(g.cx, g.cy);
     c2d.rotate(g.rot);
     c2d.drawImage(g.src, g.sx, g.sy, g.sw, g.sh, g.ox - g.dw / 2, g.oy - g.dh / 2, g.dw, g.dh);
@@ -354,7 +371,11 @@
   const rotHandleY = (g) => -g.dh / 2 - 24;
 
   function newLayerBase(type) {
-    return { id: S.nextId++, type, x: 0.5, y: 0.5, size: 0.35, rot: 0, opacity: 1, hidden: false, crop: { l: 0, t: 0, r: 0, b: 0 } };
+    return {
+      id: S.nextId++, type, x: 0.5, y: 0.5, size: 0.35, rot: 0, opacity: 1, hidden: false,
+      crop: { l: 0, t: 0, r: 0, b: 0 },
+      from: null, to: null, fadeIn: 0, fadeOut: 0, // null = clip start / end
+    };
   }
   function addText() {
     const L = Object.assign(newLayerBase('text'), {
@@ -450,7 +471,7 @@
     if (S.cropMode) return drawCropMode();
     const c = S.crop;
     ctx.drawImage(video, c.x, c.y, c.w, c.h, 0, 0, view.w, view.h);
-    for (const L of S.layers) drawLayer(ctx, L, view.w, view.h);
+    for (const L of S.layers) drawLayer(ctx, L, view.w, view.h, S.pos, L.id === S.sel ? 0.25 : 0);
     const L = selLayer();
     if (L && !L.hidden) drawSelection(L);
   }
@@ -515,8 +536,9 @@
   }
 
   function hitLayer(L, p) {
+    if (L.hidden || (S.sel !== L.id && layerAlpha(L, S.pos) <= 0)) return null;
     const g = geom(L, view.w, view.h);
-    if (!g || L.hidden) return null;
+    if (!g) return null;
     const l = toLocal(g, p.x, p.y);
     if (S.sel === L.id) {
       if (Math.hypot(l.x, l.y - rotHandleY(g)) <= HANDLE) return { g, part: 'rotate' };
@@ -660,12 +682,30 @@
   const timeToPct = (t) => (S.dur ? (t / S.dur) * 100 : 0);
 
   function buildRuler() {
-    const ruler = $('#tl-ruler');
+    const ruler = $('#tl-ruler'), ticks = $('#tl-ticks');
     ruler.innerHTML = '';
-    if (!S.loaded) return;
+    ticks.innerHTML = '';
     const width = track.clientWidth || 600;
+    const tick = (x, major) => {
+      const i = document.createElement('i');
+      i.style.left = Math.round(x) + 'px';
+      if (major) i.className = 'major';
+      ticks.appendChild(i);
+    };
+    if (!S.loaded) {
+      for (let x = 8; x < width; x += 10) tick(x, false);
+      return;
+    }
     const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
     const step = steps.find((s) => (s / S.dur) * width >= 70) || 3600;
+    // minor ticks: the finest of 1/5, 1/4, 1/2 of a label step that stays >= 6px apart
+    const minor = [step / 5, step / 4, step / 2, step].find((m) => (m / S.dur) * width >= 6);
+    const n = Math.round(S.dur / minor);
+    for (let k = 0; k <= n; k++) {
+      const t = k * minor;
+      const major = Math.abs(t / step - Math.round(t / step)) < 1e-6;
+      tick((t / S.dur) * (width - 1), major);
+    }
     for (let t = 0; t <= S.dur + 1e-6; t += step) {
       const span = document.createElement('span');
       span.style.left = timeToPct(t) + '%';
@@ -803,7 +843,8 @@
         await seekExact(Math.min(S.start + i / S.fps, S.dur - 0.001));
         octx.clearRect(0, 0, OW, OH);
         drawScaled(octx, video, S.crop.x, S.crop.y, S.crop.w, S.crop.h, OW, OH);
-        for (const L of S.layers) drawLayer(octx, L, OW, OH);
+        const t = S.start + i / S.fps;
+        for (const L of S.layers) drawLayer(octx, L, OW, OH, t);
         frames.push({ data: octx.getImageData(0, 0, OW, OH).data, delay: delays[i] });
         progress(((i + 1) / n) * 0.5, `grabbing frame ${i + 1} / ${n}`);
       }
@@ -852,6 +893,7 @@
       $('#exp-meta').insertAdjacentHTML('beforeend', `<br><span class="ok">saved</span> ${path.replace(/&/g, '&amp;').replace(/</g, '&lt;')} <button class="btn small" data-action="reveal">[ open folder ]</button>`);
       $('#exp-meta').dataset.path = path;
       $('#exp-download').innerHTML = '[ &#x2713; saved ]';
+      markSaved();
     } catch (err) {
       status('save failed: ' + err.message);
     }
@@ -890,6 +932,13 @@
     $('#tl-h-start').style.left = timeToPct(S.start) + '%';
     $('#tl-h-end').style.left = timeToPct(S.end) + '%';
     $('#tl-info').textContent = S.loaded ? `${frameCount()} frames @ ${S.fps} fps` : '';
+    const L = selLayer(), bar = $('#tl-layer');
+    bar.classList.toggle('hidden', !L || !S.loaded);
+    if (L && S.loaded) {
+      const a = L.from != null ? L.from : S.start, b = L.to != null ? L.to : S.end;
+      bar.style.left = timeToPct(a) + '%';
+      bar.style.width = timeToPct(Math.max(0, b - a)) + '%';
+    }
     refreshTime();
   }
   function refreshOutput() {
@@ -934,6 +983,7 @@
       li.innerHTML =
         `<span class="ltype">${L.type === 'text' ? 'T' : '▣'}</span>` +
         `<span class="lname"></span>` +
+        (isTimed(L) ? `<span class="dim" title="only shows for part of the gif">\u25F7</span>` : '') +
         `<button data-lact="vis" title="show/hide">${L.hidden ? '○' : '●'}</button>` +
         `<button data-lact="up" title="bring forward">▲</button>` +
         `<button data-lact="down" title="send backward">▼</button>` +
@@ -969,6 +1019,10 @@
       setVal(p.num, Math.round(p.get(L) * p.mult));
     }
     for (const [id, side] of [['lp-cl', 'l'], ['lp-cr', 'r'], ['lp-ct', 't'], ['lp-cb', 'b']]) setVal(id, L.crop[side]);
+    setVal('lp-from', L.from != null ? fmtTime(L.from) : '');
+    setVal('lp-to', L.to != null ? fmtTime(L.to) : '');
+    setVal('lp-fadein', L.fadeIn || 0);
+    setVal('lp-fadeout', L.fadeOut || 0);
   }
 
   function refreshAll() {
@@ -1102,6 +1156,44 @@
   timeInput('t-end', (v) => { setEnd(v); seek(S.end); });
   timeInput('t-dur', (v) => setEnd(S.start + v));
 
+  // layer show-from / show-to / fades
+  for (const [id, key] of [['lp-from', 'from'], ['lp-to', 'to']]) {
+    const el = document.getElementById(id);
+    el.addEventListener('change', () => {
+      const L = selLayer(); if (!L) return;
+      const v = el.value.trim() === '' ? null : parseTime(el.value);
+      if (v === null || !isNaN(v)) L[key] = v === null ? null : clamp(v, 0, S.dur);
+      el.blur();
+      refreshAll();
+    });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
+  }
+  for (const [id, key] of [['lp-fadein', 'fadeIn'], ['lp-fadeout', 'fadeOut']]) {
+    document.getElementById(id).addEventListener('change', (e) => {
+      const L = selLayer(); if (!L) return;
+      const v = parseFloat(e.target.value);
+      L[key] = isNaN(v) ? 0 : clamp(v, 0, 60);
+      refreshAll();
+    });
+  }
+
+  // ------------------------------------------------------------ quit protection
+  // "Unsaved" = a video is loaded but no gif has been saved/downloaded since.
+  const isDirty = () => S.loaded && !S.saved;
+  function syncDirty() {
+    if (S.local) api('/api/state', { method: 'POST', body: JSON.stringify({ dirty: isDirty() }) }).catch(() => {});
+  }
+  function markSaved() { S.saved = true; syncDirty(); }
+  function askQuit() {
+    // called by the launcher when the window's close button is pressed
+    closeExport();
+    $('#modal-help').classList.add('hidden');
+    $('#modal-quit').classList.remove('hidden');
+  }
+  window.addEventListener('beforeunload', (e) => {
+    if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
+  });
+
   // buttons with data-action
   const ACTIONS = {
     'open-video': () => $('#video-file').click(),
@@ -1124,13 +1216,18 @@
     'layer-reset': () => { const L = selLayer(); if (L) { L.rot = 0; L.opacity = 1; L.crop = { l: 0, t: 0, r: 0, b: 0 }; L.size = L.type === 'text' ? 0.14 : 0.35; refreshAll(); } },
     'layer-dup': () => duplicateLayer(selLayer()),
     'layer-del': () => deleteLayer(selLayer()),
+    'layer-from': () => { const L = selLayer(); if (L) { L.from = S.pos; if (L.to != null && L.to <= L.from) L.to = null; refreshAll(); } },
+    'layer-to': () => { const L = selLayer(); if (L) { L.to = S.pos; if (L.from != null && L.from >= L.to) L.from = null; refreshAll(); } },
+    'layer-whole': () => { const L = selLayer(); if (L) { L.from = null; L.to = null; L.fadeIn = 0; L.fadeOut = 0; refreshAll(); } },
+    'quit-yes': () => { $('#modal-quit').classList.add('hidden'); api('/api/quit', { method: 'POST' }).catch(() => {}); },
+    'quit-no': () => $('#modal-quit').classList.add('hidden'),
     reveal: () => { const p = $('#exp-meta').dataset.path; if (p) api('/api/reveal?path=' + encodeURIComponent(p)).catch(() => {}); },
   };
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-action]');
     if (b && ACTIONS[b.dataset.action]) { ACTIONS[b.dataset.action](); b.blur(); }
   });
-  $('#exp-download').addEventListener('click', saveResult);
+  $('#exp-download').addEventListener('click', (e) => { if (S.local) saveResult(e); else markSaved(); });
   $('#empty').addEventListener('click', () => $('#video-file').click());
 
   let imagePickMode = null;
@@ -1161,6 +1258,7 @@
     const typing = e.target.matches('input:not([type=checkbox]):not([type=range]):not([type=color]), textarea, select');
     if (e.key === 'Escape') {
       if (typing) { e.target.blur(); return; }
+      if (!$('#modal-quit').classList.contains('hidden')) return $('#modal-quit').classList.add('hidden');
       if (!$('#modal-export').classList.contains('hidden')) return closeExport();
       if (!$('#modal-help').classList.contains('hidden')) return $('#modal-help').classList.add('hidden');
       if (S.cropMode) return setCropMode(false);
@@ -1168,6 +1266,12 @@
       return;
     }
     if (typing) return;
+    if (!$('#modal-quit').classList.contains('hidden')) {
+      if (e.key === 'q' || e.key === 'y' || e.key === 'Enter') ACTIONS['quit-yes']();
+      else if (e.key === 'n') ACTIONS['quit-no']();
+      e.preventDefault();
+      return;
+    }
     if (!$('#modal-export').classList.contains('hidden')) {
       if (e.key === 'Enter' && !$('#exp-result').classList.contains('hidden')) $('#exp-download').click();
       return;
@@ -1243,5 +1347,5 @@
   });
 
   // test/automation hook
-  window.gifsonic = { S, loadVideo, addImage, addText, exportGif, seek, setStart, setEnd, select, refreshAll, layout, setCropMode };
+  window.gifsonic = { S, askQuit, loadVideo, addImage, addText, exportGif, seek, setStart, setEnd, select, refreshAll, layout, setCropMode };
 })();

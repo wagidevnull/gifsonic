@@ -15,9 +15,12 @@ use with a mouse.
 - **Text & image layers** on top: move, resize and rotate them by dragging
   (or with the keyboard), trim (crop) each side, change opacity, reorder, hide.
   Text has font, bold/italic, alignment, colour, outline and background box.
+- **Layer timing**: choose when each text/image appears and disappears, with
+  optional fade in / fade out.
 - **Good, small GIFs**: built-in encoder with a shared palette, optional
   dithering, and frame-to-frame optimisation (only changed pixels are stored).
 - **Private**: everything runs on your computer. Nothing is uploaded.
+- **No lost work**: closing the window before you've saved a GIF asks first.
 - **Keyboard-driven** if you want it: press <kbd>?</kbd> in the app for all shortcuts.
 
 ## Install (Linux)

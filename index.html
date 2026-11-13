@@ -15,8 +15,8 @@
     <span class="dim">video &rarr; gif</span>
     <span id="file-label" class="file-label dim">no video loaded</span>
     <span class="spacer"></span>
-    <button class="btn" data-action="open-video" title="Open video (v)">[ v open video ]</button>
-    <button class="btn" data-action="help" title="Keyboard shortcuts (?)">[ ? help ]</button>
+    <button class="btn" data-action="open-video" title="Open a video">[ open video ]<span class="hk">v</span></button>
+    <button class="btn" data-action="help" title="Keyboard shortcuts">[ help ]<span class="hk">?</span></button>
   </header>
 
   <main class="workspace">
@@ -26,11 +26,11 @@
       <div id="stage" class="stage">
         <canvas id="preview"></canvas>
         <div id="empty" class="empty">
-<pre class="logo">       _  __                 _
-  __ _(_)/ _|___  ___  _ __ (_) ___
- / _` | | |_/ __|/ _ \| '_ \| |/ __|
-| (_| | |  _\__ \ (_) | | | | | (__
- \__, |_|_| |___/\___/|_| |_|_|\___|
+<pre class="logo">        _   __                     _
+  __ _ (_) / _| ___   ___   _ __  (_)  ___
+ / _` || || |_ / __| / _ \ | '_ \ | | / __|
+| (_| || ||  _|\__ \| (_) || | | || || (__
+ \__, ||_||_|  |___/ \___/ |_| |_||_| \___|
  |___/</pre>
           <p>drop a video here, or press <kbd>v</kbd></p>
           <p class="dim">mp4 / webm / anything your browser can play &middot; nothing is uploaded, it all stays on your computer</p>
@@ -63,15 +63,17 @@
         </label>
         <span class="sep">&#x2502;</span>
         <label class="field"><span class="dim">start</span><input id="t-start" class="time" type="text"></label>
-        <button class="btn small" data-action="set-start" title="Start at playhead (i)">[ i ]</button>
+        <button class="btn small" data-action="set-start" title="Set start to the playhead">[ set ]<span class="hk">i</span></button>
         <label class="field"><span class="dim">end</span><input id="t-end" class="time" type="text"></label>
-        <button class="btn small" data-action="set-end" title="End at playhead (o)">[ o ]</button>
+        <button class="btn small" data-action="set-end" title="Set end to the playhead">[ set ]<span class="hk">o</span></button>
         <label class="field"><span class="dim">duration</span><input id="t-dur" class="time" type="text"></label>
       </div>
       <div id="timeline" class="timeline">
         <div class="tl-ruler" id="tl-ruler"></div>
         <div class="tl-track">
+          <div class="tl-ticks" id="tl-ticks"></div>
           <div class="tl-range" id="tl-range"></div>
+          <div class="tl-layer hidden" id="tl-layer" title="when the selected layer is shown"></div>
           <div class="tl-handle" id="tl-h-start" title="drag to set start"></div>
           <div class="tl-handle" id="tl-h-end" title="drag to set end"></div>
           <div class="tl-playhead" id="tl-playhead"></div>
@@ -108,16 +110,16 @@
           <span class="label">loop</span>
           <select id="loop"><option value="0">forever</option><option value="-1">play once</option><option value="2">3 times</option></select>
           <span class="label">crop</span>
-          <button class="btn small" data-action="crop">[ c edit ]</button>
+          <button class="btn small" data-action="crop" title="Crop the video">[ edit ]<span class="hk">c</span></button>
         </div>
-        <button class="btn primary wide" data-action="export">[ e  make gif ]</button>
+        <button class="btn primary wide" data-action="export" title="Render and save the GIF">[ make gif ]<span class="hk">e</span></button>
       </section>
 
       <section class="box">
         <div class="box-title"><span>layers</span><span class="dim">text &amp; images on top</span></div>
         <div class="row">
-          <button class="btn" data-action="add-text">[ t + text ]</button>
-          <button class="btn" data-action="add-image">[ p + image ]</button>
+          <button class="btn" data-action="add-text" title="Add a text layer">[ + text ]<span class="hk">t</span></button>
+          <button class="btn" data-action="add-image" title="Add an image layer">[ + image ]<span class="hk">p</span></button>
         </div>
         <ul id="layer-list" class="layer-list"></ul>
       </section>
@@ -163,6 +165,19 @@
           <div class="row"><span class="label">rotate</span><input type="range" id="lp-rot" min="-180" max="180" step="1"><input class="num" id="lp-rot-n" type="number" step="1"><span class="dim">&deg;</span></div>
           <div class="row"><span class="label">opacity</span><input type="range" id="lp-op" min="0" max="1" step="0.01"><input class="num" id="lp-op-n" type="number" step="1"><span class="dim">%</span></div>
           <div class="hr"></div>
+          <div class="row"><span class="label">show</span><span class="dim">when it appears in the gif</span></div>
+          <div class="row">
+            <span class="label dim">from</span><input id="lp-from" class="time" type="text" placeholder="clip start">
+            <button class="btn small" data-action="layer-from" title="Appear at the playhead">[ now ]</button>
+            <span class="label dim">to</span><input id="lp-to" class="time" type="text" placeholder="clip end">
+            <button class="btn small" data-action="layer-to" title="Disappear at the playhead">[ now ]</button>
+          </div>
+          <div class="row">
+            <span class="label dim">fade in</span><input id="lp-fadein" class="num" type="number" min="0" step="0.1"><span class="dim">s</span>
+            <span class="label dim">fade out</span><input id="lp-fadeout" class="num" type="number" min="0" step="0.1"><span class="dim">s</span>
+            <button class="btn small" data-action="layer-whole" title="Show for the whole gif">[ whole gif ]</button>
+          </div>
+          <div class="hr"></div>
           <div class="row"><span class="label">crop</span><span class="dim">trim each side of the layer</span></div>
           <div class="row"><span class="label dim">left</span><input type="range" id="lp-cl" min="0" max="0.95" step="0.005"><span class="label dim">right</span><input type="range" id="lp-cr" min="0" max="0.95" step="0.005"></div>
           <div class="row"><span class="label dim">top</span><input type="range" id="lp-ct" min="0" max="0.95" step="0.005"><span class="label dim">bottom</span><input type="range" id="lp-cb" min="0" max="0.95" step="0.005"></div>
@@ -197,15 +212,27 @@
     <div id="exp-progress">
       <pre id="exp-bar" class="bar"></pre>
       <p id="exp-stage" class="dim"></p>
-      <button class="btn" data-action="export-cancel">[ esc cancel ]</button>
+      <button class="btn" data-action="export-cancel">[ cancel ]<span class="hk">esc</span></button>
     </div>
     <div id="exp-result" class="hidden">
       <div class="result-img"><img id="exp-img" alt="your gif"></div>
       <p id="exp-meta"></p>
       <div class="row center">
         <a id="exp-download" class="btn primary" download>[ &#x23CE; download ]</a>
-        <button class="btn" data-action="export-close">[ esc back to editing ]</button>
+        <button class="btn" data-action="export-close">[ back to editing ]<span class="hk">esc</span></button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="modal-quit" class="modal hidden">
+  <div class="box modal-box">
+    <div class="box-title"><span>quit?</span><span></span></div>
+    <p>You haven't saved a gif from this video yet.</p>
+    <p class="dim">Quit anyway and lose your edits?</p>
+    <div class="row center">
+      <button class="btn danger" data-action="quit-yes">[ quit ]<span class="hk">q</span></button>
+      <button class="btn primary" data-action="quit-no">[ keep editing ]<span class="hk">esc</span></button>
     </div>
   </div>
 </div>
@@ -236,6 +263,7 @@
         <dd><kbd>+</kbd> / <kbd>-</kbd> bigger / smaller</dd>
         <dd><kbd>r</kbd> / <kbd>R</kbd> rotate 15&deg; (hold <kbd>shift</kbd> while dragging to snap)</dd>
         <dd><kbd>del</kbd> delete layer &middot; <kbd>ctrl</kbd>+<kbd>d</kbd> duplicate</dd>
+        <dd>set when a layer shows under <em>show</em> in its settings</dd>
       </dl>
     </div>
   </div>
