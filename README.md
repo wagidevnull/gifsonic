@@ -22,7 +22,7 @@ fade in or out if you want one.
 
 gifsonic has its own encoder with a shared palette,
 optional dithering, and it only stores the pixels that change between frames.
-Everything stays on your computer
+Everything stays on your computer.
 
 ## Install
 
