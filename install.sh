@@ -1,11 +1,11 @@
 #!/bin/sh
-# gifsonic installer (per-user, no root needed except for the window packages)
+# gifsonic installer (per-user, no root needed except for system packages)
 #   ./install.sh              install or update
 #   ./install.sh --uninstall  remove gifsonic
 set -e
 
+REPO=wagidevnull/gifsonic
 SHARE="${XDG_DATA_HOME:-$HOME/.local/share}"
-DEST="$SHARE/gifsonic/app"
 BIN="$HOME/.local/bin"
 APPS="$SHARE/applications"
 ICONS="$SHARE/icons/hicolor"
@@ -22,7 +22,7 @@ refresh_desktop() {
 
 if [ "$1" = "--uninstall" ]; then
     say "Removing gifsonic"
-    rm -rf "$SHARE/gifsonic"
+    rm -rf "$SHARE/gifsonic" "$SHARE/lol.wagi.gifsonic"
     rm -f "$BIN/gifsonic" "$APPS/gifsonic.desktop" \
           "$ICONS/scalable/apps/gifsonic.svg" "$ICONS/256x256/apps/gifsonic.png"
     refresh_desktop
@@ -32,59 +32,99 @@ fi
 [ -z "$1" ] || die "unknown option: $1"
 [ "$(id -u)" -ne 0 ] || die "run this as your normal user, not root"
 
-command -v python3 >/dev/null || die "python3 is required"
-
-# ------------------------------------------------------------------ window packages
-native_ok() { python3 -c 'import webview' 2>/dev/null; }
-
-if ! command -v ffmpeg >/dev/null; then
-    warn "ffmpeg not found: gifsonic works, but can't convert unusual video formats (mkv/mov/hevc...)."
+# ------------------------------------------------------------------ system packages
+# gifsonic's window is WebKitGTK; GStreamer plays the videos.
+pm=""
+if command -v pacman >/dev/null; then
+    runtime="webkit2gtk-4.1 gst-libav gst-plugins-good"
+    pm="sudo pacman -S --needed"
+elif command -v apt-get >/dev/null; then
+    runtime="libwebkit2gtk-4.1-0 gstreamer1.0-libav gstreamer1.0-plugins-good"
+    build_deps="libwebkit2gtk-4.1-dev"
+    pm="sudo apt-get install -y"
+elif command -v dnf >/dev/null; then
+    runtime="webkit2gtk4.1 gstreamer1-plugins-good gstreamer1-libav"
+    build_deps="webkit2gtk4.1-devel"
+    pm="sudo dnf install -y"
+elif command -v zypper >/dev/null; then
+    runtime="libwebkit2gtk-4_1-0 gstreamer-plugins-good gstreamer-plugins-libav"
+    build_deps="webkit2gtk3-soup2-devel"
+    pm="sudo zypper install -y"
 fi
 
-if ! native_ok; then
-    say "Window packages"
-    echo "gifsonic needs pywebview + WebKitGTK to open its window."
-    pm=""
-    if command -v pacman >/dev/null; then
-        pm="sudo pacman -S --needed python-pywebview webkit2gtk-4.1 python-gobject gst-libav gst-plugins-good"
-    elif command -v apt-get >/dev/null; then
-        pm="sudo apt-get install -y python3-webview gir1.2-webkit2-4.1 python3-gi gstreamer1.0-libav gstreamer1.0-plugins-good"
-    elif command -v dnf >/dev/null; then
-        pm="sudo dnf install -y python3-pywebview webkit2gtk4.1 python3-gobject gstreamer1-libav gstreamer1-plugins-good"
-    elif command -v zypper >/dev/null; then
-        pm="sudo zypper install -y python3-pywebview webkit2gtk3 python3-gobject gstreamer-plugins-libav gstreamer-plugins-good"
-    fi
+have_webkit() { ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4\.1\.so\.0'; }
+have_h264() { ! command -v gst-inspect-1.0 >/dev/null || gst-inspect-1.0 avdec_h264 >/dev/null 2>&1; }
+
+if ! have_webkit || ! have_h264; then
+    say "System packages"
+    echo "gifsonic needs WebKitGTK (its window) and GStreamer plugins (to play videos)."
     if [ -n "$pm" ] && [ -t 0 ]; then
-        printf 'Install it now with:\n  %s\n[Y/n] ' "$pm"
+        printf 'Install them now with:\n  %s %s\n[Y/n] ' "$pm" "$runtime"
         read -r ans
         case "$ans" in
             [nN]*) ;;
-            *) $pm || warn "package install failed." ;;
+            *) $pm $runtime || warn "package install failed." ;;
         esac
     elif [ -n "$pm" ]; then
-        echo "Install them with:  $pm"
+        echo "Install them with:  $pm $runtime"
     else
-        echo "Install pywebview and WebKitGTK with your package manager."
+        echo "Install WebKitGTK 4.1 and the GStreamer libav + good plugins with your package manager."
     fi
+fi
+command -v ffmpeg >/dev/null || warn "ffmpeg not found: gifsonic works, but can't open unusual formats (mkv/mov/hevc...)."
+
+# ------------------------------------------------------------------ get the program
+# Build it if Rust and the WebKitGTK headers are here, otherwise download the
+# prebuilt binary from the latest GitHub release.
+fetch_binary() {
+    arch=$(uname -m)
+    mkdir -p target
+    out=target/gifsonic-$arch
+    url=https://github.com/$REPO/releases/latest/download/gifsonic-$arch
+    say "Downloading gifsonic for $arch"
+    if command -v curl >/dev/null; then
+        get() { curl -fsSL -o "$2" "$1"; }
+    elif command -v wget >/dev/null; then
+        get() { wget -qO "$2" "$1"; }
+    else
+        die "need cargo (to build) or curl/wget (to download)"
+    fi
+    get "$url" "$out" || die "no prebuilt gifsonic for $arch - install Rust (cargo) and re-run to build it"
+    get "$url.sha256" "$out.sha256" || die "couldn't download the checksum"
+    (cd target && sed "s|  .*|  gifsonic-$arch|" "gifsonic-$arch.sha256" | sha256sum -c --quiet -) \
+        || die "checksum mismatch - download corrupted?"
+    chmod +x "$out"
+    NEW_BIN=$out
+}
+
+if command -v cargo >/dev/null && pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+    say "Building gifsonic (the first build takes a few minutes)"
+    (cd src-tauri && cargo build --release --locked)
+    NEW_BIN=src-tauri/target/release/gifsonic
+else
+    if command -v cargo >/dev/null && [ -n "$build_deps" ]; then
+        echo "(To build from source instead, install $build_deps.)"
+    fi
+    fetch_binary
 fi
 
 # ------------------------------------------------------------------ install files
 say "Installing gifsonic"
-rm -rf "$DEST"
-mkdir -p "$DEST" "$BIN" "$APPS" "$ICONS/scalable/apps" "$ICONS/256x256/apps"
-cp -r index.html css js gifsonic "$DEST/"
-chmod +x "$DEST/gifsonic"
-ln -sf "$DEST/gifsonic" "$BIN/gifsonic"
+rm -rf "$SHARE/gifsonic"   # the old Python version lived here
+mkdir -p "$BIN" "$APPS" "$ICONS/scalable/apps" "$ICONS/256x256/apps"
+rm -f "$BIN/gifsonic"      # may be a symlink from the old version
+install -m755 "$NEW_BIN" "$BIN/gifsonic"
 cp icons/gifsonic.svg "$ICONS/scalable/apps/gifsonic.svg"
 cp icons/gifsonic-256.png "$ICONS/256x256/apps/gifsonic.png"
 # Use the full path: app launchers (e.g. ones that start apps via systemd)
 # often don't have ~/.local/bin on their PATH.
 sed "s|^Exec=gifsonic|Exec=$BIN/gifsonic|" gifsonic.desktop > "$APPS/gifsonic.desktop"
 refresh_desktop
+"$BIN/gifsonic" --version
 
-echo "Installed to $DEST"
-if ! native_ok; then
-    warn "pywebview isn't installed yet, so gifsonic won't open until it is. Run ./install.sh again to get it."
+if ldd "$BIN/gifsonic" 2>/dev/null | grep -q 'not found'; then
+    warn "some libraries are missing, so gifsonic won't start until they're installed:"
+    ldd "$BIN/gifsonic" | grep 'not found'
 fi
 
 case ":$PATH:" in

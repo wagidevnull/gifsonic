@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "gifsonic",
+  "identifier": "lol.wagi.gifsonic",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "gifsonic",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 560,
+        "minHeight": 420,
+        "backgroundColor": "#11111b",
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage"],
+    "category": "Video",
+    "shortDescription": "Turn videos into GIFs",
+    "longDescription": "A Linux app for turning videos into GIFs, with a terminal-style interface that also works with the mouse.",
+    "copyright": "Copyright (c) 2026 Wagi",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
+    "linux": {
+      "deb": {
+        "depends": ["gstreamer1.0-libav", "gstreamer1.0-plugins-good"],
+        "desktopTemplate": "../gifsonic.desktop"
+      },
+      "rpm": {
+        "depends": ["gstreamer1-plugins-good"],
+        "desktopTemplate": "../gifsonic.desktop"
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
+  }
+}

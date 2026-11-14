@@ -20,14 +20,21 @@ You can add text and images. Drag them to move, resize or rotate them
 order. Each layer can show for only part of the GIF, with a
 fade in or out if you want one.
 
-gifsonic has its own encoder with a shared palette,
+gifsonic has its own encoder, written in Rust, with a shared palette,
 optional dithering, and it only stores the pixels that change between frames.
 Everything stays on your computer.
 
 ## Install
 
-You need Python 3. `ffmpeg` is optional but worth having, since it lets
-gifsonic open formats like MKV, MOV and HEVC.
+The easiest way is a package from the
+[latest release](https://github.com/wagidevnull/gifsonic/releases/latest):
+
+- **Debian / Ubuntu / Mint:** the `.deb`
+- **Fedora / openSUSE:** the `.rpm`
+- **Anything else:** the `.AppImage` (make it executable and run it)
+
+Or use the install script, which works on any distro and puts gifsonic in
+your home folder (no root needed):
 
 ```sh
 git clone https://github.com/wagidevnull/gifsonic.git
@@ -35,9 +42,10 @@ cd gifsonic
 ./install.sh
 ```
 
-No root needed. The installer adds gifsonic to your app menu, gives you a
-`gifsonic` command, and offers to install the window packages it needs
-(pywebview and WebKitGTK) using your package manager.
+It builds gifsonic if you have Rust installed, and otherwise downloads the
+prebuilt app. It also offers to install the system packages gifsonic needs
+(WebKitGTK and the GStreamer video plugins). `ffmpeg` is optional but worth
+having, since it lets gifsonic open formats like MKV, MOV and HEVC.
 
 ```sh
 gifsonic              # open the app
@@ -70,6 +78,18 @@ Press <kbd>?</kbd> in the app to see these.
 | <kbd>+</kbd> <kbd>-</kbd> / <kbd>r</kbd> <kbd>R</kbd> | resize / rotate layer |
 | <kbd>del</kbd> | delete layer |
 | <kbd>e</kbd> | make the GIF |
+
+## Building
+
+gifsonic is a [Tauri](https://tauri.app) app: the interface is in `ui/` and
+the Rust side (encoder, saving, ffmpeg) is in `src-tauri/`.
+
+```sh
+cd src-tauri
+cargo build --release        # target/release/gifsonic
+cargo test                   # encoder tests
+python3 ../tests/app_test.py # drives the real app window
+```
 
 ## License
 

@@ -1,0 +1,33 @@
+[package]
+name = "gifsonic"
+version = "2.0.0"
+edition = "2024"
+description = "Turn videos into GIFs"
+license = "MIT"
+authors = ["Wagi <wagi@wagi.lol>"]
+repository = "https://github.com/wagidevnull/gifsonic"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# custom-protocol: serve the bundled ui/ files, so a plain `cargo build` makes a working app.
+tauri = { version = "2", features = ["custom-protocol"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = "1"
+tempfile = "3"
+
+[dev-dependencies]
+gif = "0.13"
+
+[features]
+# Lets a test script drive the app (see tests/). Never enabled in releases.
+autotest = []
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+panic = "abort"

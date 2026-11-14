@@ -15,11 +15,10 @@
   const HANDLE = 10;     // handle hit radius (css px)
   const PREFS_KEY = 'gifsonic.prefs.v1';
 
-  // When started by the `gifsonic` launcher, a local helper is available for
-  // converting unusual video formats and saving files. The token stops other
-  // web pages from talking to it.
-  const params = new URLSearchParams(location.search);
-  const API_TOKEN = params.get('token');
+  // The Rust side of the app (src-tauri/) does the heavy lifting: encoding,
+  // ffmpeg conversion and saving.
+  const TAURI = window.__TAURI__;
+  const invoke = (cmd, args, opts) => TAURI.core.invoke(cmd, args, opts);
 
   const S = {
     loaded: false, fileName: '', dur: 0, vw: 0, vh: 0,
@@ -28,7 +27,7 @@
     crop: { x: 0, y: 0, w: 16, h: 9 }, cropMode: false /* false | 'gif' | 'item' */, cropAspect: null,
     target: 'gif', // what the timeline & crop edit: 'gif' or the selected 'item'
     layers: [], sel: null, playing: false,
-    objUrl: null, job: null, local: false, nextId: 1,
+    objUrl: null, job: null, ffmpeg: false, nextId: 1,
   };
   const view = { w: 0, h: 0, dpr: 1 };
 
@@ -76,21 +75,7 @@
     if (msg && !sticky) statusTimer = setTimeout(() => { el.textContent = ''; }, 4000);
   }
 
-  // ------------------------------------------------------------ local helper API
-  async function api(path, opts = {}) {
-    const headers = Object.assign({ 'X-Gifsonic-Token': API_TOKEN }, opts.headers || {});
-    const res = await fetch(path, Object.assign({}, opts, { headers }));
-    if (!res.ok) throw new Error((await res.text()) || res.statusText);
-    return res;
-  }
-  async function detectLocal() {
-    if (!API_TOKEN) return;
-    try {
-      const info = await (await api('/api/ping')).json();
-      S.local = true;
-      S.ffmpeg = !!info.ffmpeg;
-    } catch (_) { S.local = false; }
-  }
+  const errText = (e) => String((e && e.message) || e);
 
   // ------------------------------------------------------------ video loading
   function openVideoUrl(url) {
@@ -132,12 +117,13 @@
     } catch (err) {
       URL.revokeObjectURL(url);
       url = null;
-      if (S.local) {
+      if (S.ffmpeg) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
         for (const fmt of ['mp4', 'webm']) {
           try {
             status('converting ' + file.name + ' with ffmpeg (' + fmt + ') …', true);
-            const res = await api('/api/proxy?fmt=' + fmt, { method: 'POST', body: file, headers: { 'X-Filename': encodeURIComponent(file.name) } });
-            url = URL.createObjectURL(await res.blob());
+            const out = await invoke('convert_video', bytes, { headers: { 'x-fmt': fmt } });
+            url = URL.createObjectURL(new Blob([out], { type: 'video/' + fmt }));
             await openVideoUrl(url);
             break;
           } catch (e2) {
@@ -147,7 +133,7 @@
         }
       }
       if (!url) {
-        status("can't open " + file.name + (S.local && !S.ffmpeg ? ': install ffmpeg to open this kind of video' : ''), true);
+        status("can't open " + file.name + (S.ffmpeg ? '' : ': install ffmpeg to open this kind of video'), true);
         return;
       }
     }
@@ -918,47 +904,6 @@
     c2d.drawImage(cur, cx, cy, cw, ch, 0, 0, dw, dh);
   }
 
-  function makeWorker() {
-    try {
-      const src = '(' + gifsonicEncoderModule.toString() + ')(self);';
-      return new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function encode(frames, opts, onProgress, job) {
-    const worker = makeWorker();
-    const mainThread = async () => {
-      const gen = GifSonicEncoder.encodeGif(frames, opts);
-      let r;
-      while (!(r = gen.next()).done) {
-        if (job.cancelled) throw new Error('cancelled');
-        onProgress(r.value);
-        await new Promise((res) => setTimeout(res, 0));
-      }
-      return r.value;
-    };
-    if (!worker) return mainThread();
-    return new Promise((resolve, reject) => {
-      job.worker = worker;
-      worker.onmessage = (ev) => {
-        const m = ev.data;
-        if (m.type === 'progress') onProgress(m.value);
-        else if (m.type === 'done') { worker.terminate(); resolve(m.gif); }
-        else { worker.terminate(); reject(new Error(m.message)); }
-      };
-      worker.onerror = (err) => {
-        // e.g. workers blocked: fall back to the main thread (frames not transferred yet)
-        err.preventDefault && err.preventDefault();
-        worker.terminate();
-        job.worker = null;
-        mainThread().then(resolve, reject);
-      };
-      worker.postMessage({ frames, opts });
-    });
-  }
-
   function progress(frac, label) {
     const width = 40, n = Math.round(frac * width);
     $('#exp-bar').textContent = '[' + '█'.repeat(n) + '░'.repeat(width - n) + '] ' + String(Math.round(frac * 100)).padStart(3) + '%';
@@ -971,7 +916,7 @@
     if (S.cropMode) setCropMode(false);
     const { w: OW, h: OH } = outSize();
     const n = frameCount();
-    const job = (S.job = { cancelled: false, worker: null });
+    const job = (S.job = { cancelled: false });
     const posBefore = S.pos;
     $('#modal-export').classList.remove('hidden');
     $('#exp-progress').classList.remove('hidden');
@@ -983,8 +928,7 @@
       const off = document.createElement('canvas');
       off.width = OW; off.height = OH;
       const octx = off.getContext('2d', { willReadFrequently: true });
-      const delays = GifSonicEncoder.frameDelays(n, S.fps);
-      const frames = [];
+      await invoke('encoder_start', { opts: { width: OW, height: OH, colors: S.colors, dither: S.dither, loop: S.loop, fps: S.fps, count: n } });
       for (let i = 0; i < n; i++) {
         if (job.cancelled) throw new Error('cancelled');
         await seekExact(Math.min(S.start + i / S.fps, S.dur - 0.001));
@@ -992,17 +936,23 @@
         drawScaled(octx, video, S.crop.x, S.crop.y, S.crop.w, S.crop.h, OW, OH);
         const t = S.start + i / S.fps;
         for (const L of S.layers) drawLayer(octx, L, OW, OH, t);
-        frames.push({ data: octx.getImageData(0, 0, OW, OH).data, delay: delays[i] });
+        const px = octx.getImageData(0, 0, OW, OH).data;
+        await invoke('encoder_frame', new Uint8Array(px.buffer, px.byteOffset, px.byteLength));
         progress(((i + 1) / n) * 0.5, `grabbing frame ${i + 1} / ${n}`);
       }
-      const opts = { width: OW, height: OH, colors: S.colors, dither: S.dither, loop: S.loop, globalPalette: true, optimize: true };
-      const gif = await encode(frames, opts, (p) => progress(0.5 + p * 0.5, 'encoding'), job);
+      if (job.cancelled) throw new Error('cancelled');
+      const onProgress = new TAURI.core.Channel();
+      onProgress.onmessage = (p) => { if (!job.cancelled) progress(0.5 + p * 0.5, 'encoding'); };
+      const gif = new Uint8Array(await invoke('encoder_finish', { onProgress }));
       if (job.cancelled) throw new Error('cancelled');
       showResult(gif, OW, OH, n);
     } catch (err) {
+      // after a cancel, frames still in flight fail too: that's still just a cancel
+      const cancelled = job.cancelled || errText(err) === 'cancelled';
+      invoke('encoder_cancel').catch(() => {});
       $('#modal-export').classList.add('hidden');
-      status(err.message === 'cancelled' ? 'cancelled' : 'export failed: ' + err.message);
-      if (err.message !== 'cancelled') console.error(err);
+      status(cancelled ? 'cancelled' : 'export failed: ' + errText(err));
+      if (!cancelled) console.error(err);
     } finally {
       S.job = null;
       seek(posBefore);
@@ -1024,32 +974,32 @@
     dl.href = resultUrl;
     dl.download = name;
     dl.dataset.name = name;
-    dl.innerHTML = S.local ? '[ &#x23CE; save to Pictures ]' : '[ &#x23CE; download ]';
+    dl.innerHTML = '[ &#x23CE; save to Pictures ]';
     $('#exp-title').textContent = 'done';
     $('#exp-progress').classList.add('hidden');
     $('#exp-result').classList.remove('hidden');
   }
 
   async function saveResult(e) {
-    if (!S.local || !resultBlob) return; // browser: normal download link
     e && e.preventDefault();
+    if (!resultBlob) return;
     try {
       const name = $('#exp-download').dataset.name;
-      const res = await api('/api/save?name=' + encodeURIComponent(name), { method: 'POST', body: resultBlob });
-      const { path } = await res.json();
+      const bytes = new Uint8Array(await resultBlob.arrayBuffer());
+      const path = await invoke('save_gif', bytes, { headers: { 'x-name': encodeURIComponent(name) } });
       $('#exp-meta').insertAdjacentHTML('beforeend', `<br><span class="ok">saved</span> ${path.replace(/&/g, '&amp;').replace(/</g, '&lt;')} <button class="btn small" data-action="reveal">[ open folder ]</button>`);
       $('#exp-meta').dataset.path = path;
       $('#exp-download').innerHTML = '[ &#x2713; saved ]';
       markSaved();
     } catch (err) {
-      status('save failed: ' + err.message);
+      status('save failed: ' + errText(err));
     }
   }
 
   function closeExport() {
     if (S.job) {
       S.job.cancelled = true;
-      if (S.job.worker) S.job.worker.terminate();
+      invoke('encoder_cancel').catch(() => {});
     }
     $('#modal-export').classList.add('hidden');
   }
@@ -1339,18 +1289,16 @@
   // "Unsaved" = a video is loaded but no gif has been saved/downloaded since.
   const isDirty = () => S.loaded && !S.saved;
   function syncDirty() {
-    if (S.local) api('/api/state', { method: 'POST', body: JSON.stringify({ dirty: isDirty() }) }).catch(() => {});
+    invoke('set_dirty', { dirty: isDirty() }).catch(() => {});
   }
   function markSaved() { S.saved = true; syncDirty(); }
   function askQuit() {
-    // called by the launcher when the window's close button is pressed
+    // called when the window's close button is pressed with unsaved work
     closeExport();
     $('#modal-help').classList.add('hidden');
     $('#modal-quit').classList.remove('hidden');
   }
-  window.addEventListener('beforeunload', (e) => {
-    if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
-  });
+  TAURI.event.listen('ask-quit', () => askQuit());
 
   // buttons with data-action
   const ACTIONS = {
@@ -1381,15 +1329,15 @@
     'layer-from': () => { const L = selLayer(); if (L) { L.from = S.pos; if (L.to != null && L.to <= L.from) L.to = null; refreshAll(); } },
     'layer-to': () => { const L = selLayer(); if (L) { L.to = S.pos; if (L.from != null && L.from >= L.to) L.from = null; refreshAll(); } },
     'layer-whole': () => { const L = selLayer(); if (L) { L.from = null; L.to = null; L.fadeIn = 0; L.fadeOut = 0; refreshAll(); } },
-    'quit-yes': () => { $('#modal-quit').classList.add('hidden'); api('/api/quit', { method: 'POST' }).catch(() => {}); },
+    'quit-yes': () => { $('#modal-quit').classList.add('hidden'); invoke('quit').catch(() => {}); },
     'quit-no': () => $('#modal-quit').classList.add('hidden'),
-    reveal: () => { const p = $('#exp-meta').dataset.path; if (p) api('/api/reveal?path=' + encodeURIComponent(p)).catch(() => {}); },
+    reveal: () => { const p = $('#exp-meta').dataset.path; if (p) invoke('reveal', { path: p }).catch(() => {}); },
   };
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-action]');
     if (b && ACTIONS[b.dataset.action]) { ACTIONS[b.dataset.action](); b.blur(); }
   });
-  $('#exp-download').addEventListener('click', (e) => { if (S.local) saveResult(e); else markSaved(); });
+  $('#exp-download').addEventListener('click', (e) => saveResult(e));
   $('#empty').addEventListener('click', () => $('#video-file').click());
 
   let imagePickMode = null;
@@ -1496,18 +1444,16 @@
   canvas.classList.add('hidden');
   layout();
   refreshAll();
-  detectLocal().then(async () => {
-    if (!S.local) return;
+  (async () => {
+    S.ffmpeg = (await invoke('app_info')).ffmpeg;
     // video passed on the command line / "Open with gifsonic"
-    try {
-      const res = await api('/api/initial');
-      if (res.status === 200) {
-        const name = decodeURIComponent(res.headers.get('X-Filename') || 'video');
-        const blob = await res.blob();
-        loadVideo(new File([blob], name, { type: blob.type }));
-      }
-    } catch (_) { /* no initial file */ }
-  });
+    const initial = await invoke('initial_video');
+    if (initial) {
+      status('loading ' + initial.name + ' …', true);
+      const bytes = await invoke('initial_video_bytes');
+      loadVideo(new File([bytes], initial.name));
+    }
+  })().catch((e) => status('startup failed: ' + errText(e)));
 
   // test/automation hook
   window.gifsonic = { S, askQuit, loadVideo, addImage, addText, exportGif, seek, setStart, setEnd, select, refreshAll, layout, setCropMode };
