@@ -1,5 +1,5 @@
 #!/bin/sh
-# gifsonic installer (per-user, no root needed except for optional packages)
+# gifsonic installer (per-user, no root needed except for the window packages)
 #   ./install.sh              install or update
 #   ./install.sh --uninstall  remove gifsonic
 set -e
@@ -34,7 +34,7 @@ fi
 
 command -v python3 >/dev/null || die "python3 is required"
 
-# ------------------------------------------------------------------ optional extras
+# ------------------------------------------------------------------ window packages
 native_ok() { python3 -c 'import webview' 2>/dev/null; }
 
 if ! command -v ffmpeg >/dev/null; then
@@ -42,9 +42,8 @@ if ! command -v ffmpeg >/dev/null; then
 fi
 
 if ! native_ok; then
-    say "Native window"
-    echo "gifsonic can open in its own window (needs pywebview + WebKitGTK),"
-    echo "or in a browser window if you skip this."
+    say "Window packages"
+    echo "gifsonic needs pywebview + WebKitGTK to open its window."
     pm=""
     if command -v pacman >/dev/null; then
         pm="sudo pacman -S --needed python-pywebview webkit2gtk-4.1 python-gobject gst-libav gst-plugins-good"
@@ -59,11 +58,13 @@ if ! native_ok; then
         printf 'Install it now with:\n  %s\n[Y/n] ' "$pm"
         read -r ans
         case "$ans" in
-            [nN]*) echo "Skipped - gifsonic will use a browser window." ;;
-            *) $pm || warn "package install failed - gifsonic will use a browser window." ;;
+            [nN]*) ;;
+            *) $pm || warn "package install failed." ;;
         esac
     elif [ -n "$pm" ]; then
-        echo "To get the native window later, run:  $pm"
+        echo "Install them with:  $pm"
+    else
+        echo "Install pywebview and WebKitGTK with your package manager."
     fi
 fi
 
@@ -81,8 +82,10 @@ cp icons/gifsonic-256.png "$ICONS/256x256/apps/gifsonic.png"
 sed "s|^Exec=gifsonic|Exec=$BIN/gifsonic|" gifsonic.desktop > "$APPS/gifsonic.desktop"
 refresh_desktop
 
-if native_ok; then mode="native window"; else mode="browser window"; fi
-echo "Installed to $DEST ($mode)"
+echo "Installed to $DEST"
+if ! native_ok; then
+    warn "pywebview isn't installed yet, so gifsonic won't open until it is. Run ./install.sh again to get it."
+fi
 
 case ":$PATH:" in
     *":$BIN:"*) ;;

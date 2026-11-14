@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""gifsonic launcher: runs the app in its own window on Linux.
+"""gifsonic: turn videos into GIFs.
 
-Starts a small local helper (127.0.0.1 only, random port, secret token) that
-serves the app and adds desktop features the browser can't do alone:
-converting video formats the window can't play (via ffmpeg) and saving GIFs
-to ~/Pictures/gifsonic.
+Opens the gifsonic window (pywebview + WebKitGTK). A small helper bound to
+127.0.0.1 with a random port and secret token runs alongside it, converting
+video formats the window can't play (via ffmpeg) and saving GIFs to
+~/Pictures/gifsonic.
 
-Window: a native window via pywebview if it's installed, otherwise a
-Chromium-family browser in app mode, otherwise your default browser.
-
-usage: gifsonic [VIDEO] [--browser] [--no-window] [--version]
+usage: gifsonic [VIDEO] [--version]
 """
 
 import argparse
@@ -23,17 +20,14 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import urllib.parse
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 APP_DIR = os.path.dirname(os.path.realpath(__file__))
 DATA_DIR = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "gifsonic")
 TOKEN = secrets.token_urlsafe(24)
-HEARTBEAT_TIMEOUT = 30  # seconds without a ping before the helper exits (browser mode)
 
 initial_file = None
-last_ping = time.monotonic()
 window = None                              # pywebview window, when native
 app_state = {"dirty": False, "quitting": False}  # dirty = video loaded, no gif saved yet
 
@@ -118,7 +112,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     # ---------------------------------------------------------------- routes
     def do_GET(self):
-        global last_ping
         url = urllib.parse.urlparse(self.path)
         if not url.path.startswith("/api/"):
             return super().do_GET()
@@ -126,7 +119,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         q = urllib.parse.parse_qs(url.query)
         if url.path == "/api/ping":
-            last_ping = time.monotonic()
             return self.reply(200, json.dumps({"version": VERSION, "ffmpeg": bool(shutil.which("ffmpeg"))}), "application/json")
         if url.path == "/api/initial":
             if not initial_file:
@@ -218,58 +210,50 @@ def on_closing():
     return True
 
 
-def open_native(url):
+def window_packages_hint():
+    """The command that installs pywebview + WebKitGTK on this distro, if we know it."""
+    for pm, cmd in (
+        ("pacman", "sudo pacman -S --needed python-pywebview webkit2gtk-4.1 python-gobject gst-libav gst-plugins-good"),
+        ("apt-get", "sudo apt-get install python3-webview gir1.2-webkit2-4.1 python3-gi gstreamer1.0-libav gstreamer1.0-plugins-good"),
+        ("dnf", "sudo dnf install python3-pywebview webkit2gtk4.1 python3-gobject gstreamer1-libav gstreamer1-plugins-good"),
+        ("zypper", "sudo zypper install python3-pywebview webkit2gtk3 python3-gobject gstreamer-plugins-libav gstreamer-plugins-good"),
+    ):
+        if shutil.which(pm):
+            return cmd
+    return "install pywebview and WebKitGTK with your package manager"
+
+
+def fail(reason):
+    """Explain why the window can't open, in the terminal and as a desktop notification."""
+    hint = window_packages_hint()
+    print(f"gifsonic: {reason}\nInstall the window packages with:\n  {hint}", file=sys.stderr)
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", "-a", "gifsonic", "-i", "gifsonic", "gifsonic can't open",
+                        f"{reason}\nInstall the window packages with:\n{hint}"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    sys.exit(1)
+
+
+def open_window(url):
     global window
     try:
         import webview  # pywebview
     except ImportError:
-        return False
+        fail("pywebview is not installed.")
     os.makedirs(DATA_DIR, exist_ok=True)
     try:
         window = webview.create_window("gifsonic", url, width=1360, height=860, min_size=(900, 600),
                                        background_color="#11111b")
         window.events.closing += on_closing
         webview.start(private_mode=False, storage_path=os.path.join(DATA_DIR, "webview"))
-        return True
-    except Exception as e:  # missing GTK/Qt backend etc.
-        print(f"gifsonic: native window unavailable ({e}); falling back to a browser", file=sys.stderr)
-        return False
-
-
-def open_browser(url):
-    """Chromium-family app window if available (closes cleanly), else default browser."""
-    for name in ("chromium", "google-chrome-stable", "google-chrome", "brave", "brave-browser",
-                 "vivaldi-stable", "microsoft-edge-stable", "thorium-browser"):
-        exe = shutil.which(name)
-        if exe:
-            profile = os.path.join(DATA_DIR, "browser-profile")
-            os.makedirs(profile, exist_ok=True)
-            p = subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={profile}", "--window-size=1360,860",
-                                  "--no-first-run", "--no-default-browser-check"],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            p.wait()
-            return
-    subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    wait_for_heartbeats()
-
-
-def wait_for_heartbeats():
-    """Default browser: we can't see the tab close, so exit when it stops pinging."""
-    global last_ping
-    last_ping = time.monotonic() + 30  # grace period for the browser to start
-    try:
-        while time.monotonic() - last_ping < HEARTBEAT_TIMEOUT:
-            time.sleep(2)
-    except KeyboardInterrupt:
-        pass
+    except Exception as e:  # missing GTK/WebKit backend etc.
+        fail(f"the window couldn't start ({e}).")
 
 
 def main():
     global initial_file
     ap = argparse.ArgumentParser(prog="gifsonic", description="Turn videos into GIFs.")
     ap.add_argument("video", nargs="?", help="video to open")
-    ap.add_argument("--browser", action="store_true", help="open in a browser instead of a native window")
-    ap.add_argument("--no-window", action="store_true", help="just print the URL and keep serving")
     ap.add_argument("--version", action="version", version=f"gifsonic {VERSION}")
     args = ap.parse_args()
 
@@ -285,13 +269,7 @@ def main():
         print("gifsonic: ffmpeg not found - unusual video formats can't be converted", file=sys.stderr)
 
     try:
-        if args.no_window:
-            print(url, flush=True)
-            print("serving - press Ctrl+C to stop", file=sys.stderr)
-            while True:
-                time.sleep(3600)
-        elif args.browser or not open_native(url):
-            open_browser(url)
+        open_window(url)
     except KeyboardInterrupt:
         pass
     finally:

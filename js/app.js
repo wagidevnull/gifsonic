@@ -86,8 +86,9 @@
   async function detectLocal() {
     if (!API_TOKEN) return;
     try {
-      await api('/api/ping');
+      const info = await (await api('/api/ping')).json();
       S.local = true;
+      S.ffmpeg = !!info.ffmpeg;
     } catch (_) { S.local = false; }
   }
 
@@ -146,7 +147,7 @@
         }
       }
       if (!url) {
-        status("can't play " + file.name + (S.local ? '' : ' in this browser — try an mp4 or webm, or use the gifsonic app'), true);
+        status("can't open " + file.name + (S.local && !S.ffmpeg ? ': install ffmpeg to open this kind of video' : ''), true);
         return;
       }
     }
@@ -1497,8 +1498,6 @@
   refreshAll();
   detectLocal().then(async () => {
     if (!S.local) return;
-    // keep the launcher's helper alive while this window is open
-    setInterval(() => api('/api/ping').catch(() => {}), 5000);
     // video passed on the command line / "Open with gifsonic"
     try {
       const res = await api('/api/initial');
